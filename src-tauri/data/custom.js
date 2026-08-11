@@ -241,12 +241,21 @@ function watchVideoElements(){
             bindVideoPlayer(v);
         });
         updateFloatBallVisibility();
+        // 视频元素出现 = 已进入播放页，触发一次自动检测
+        if(hasVideoElement()){
+            clearTimeout(watchVideoElements._detectTimer);
+            watchVideoElements._detectTimer = setTimeout(autoDetectAndNotify, 600);
+        }
     })
     videoObserver.observe(document.body, {childList:true, subtree:true});
     document.querySelectorAll('video').forEach(v=>{
         bindVideoPlayer(v);
     });
     updateFloatBallVisibility();
+    // 初始若有视频（如页面加载即带播放器），也检测一次
+    if(hasVideoElement()){
+        setTimeout(autoDetectAndNotify, 800);
+    }
 }
 // ===================== 【网页性能加速模块】开始 =====================
 (function performanceBoost(){
@@ -1297,6 +1306,171 @@ function extractEpisodesFromContainer(container){
         return a.text.localeCompare(b.text);
     });
 }
+// ========== 影片元数据（名称/简介/年份）自动识别 ==========
+// 从当前播放页 DOM 中尽可能全面地提取影片标题
+function getMovieTitle(){
+    const clean = (t)=> (t||'').trim().replace(/\s+/g,' ').replace(/\s*[-–—]\s*第.+集.*$/,'')
+                  .replace(/\s*第\s*[\d一二三四五六七八九十]+集.*$/,'')
+                  .replace(/\s*[-–—]\s*(电影|电视剧|动漫|综艺|短剧).*$/,'');
+    const h1 = document.querySelector('h1');
+    if(h1){ const t = clean(h1.textContent); if(t && t.length>=2 && t.length<60) return t; }
+    const sel = document.querySelector('.module-info-heading,.detail-title,[itemprop="name"],.video-title,.play-title,.anthology-title');
+    if(sel){ const t = clean(sel.textContent); if(t && t.length>=2 && t.length<60) return t; }
+    let dt = (document.title||'').trim().replace(/\s*[-|·]\s*(好好看|hhkan\d*)\.?\w*\s*$/i,'')
+             .replace(/\s*[-|·]\s*(在线观看|免费观看|高清|完整版).*$/,'')
+             .replace(/\s*[-–—]\s*第.+集.*$/,'')
+             .replace(/\s*第\s*[\d一二三四五六七八九十]+集.*$/,'')
+             .replace(/\s*[-|·]\s*www\.hhkan\d*\.com.*$/i,'')
+             .trim();
+    return (dt && dt.length>=2 && dt.length<60) ? dt : '';
+}
+// 从文本中提取 4 位公元年
+function parseYearFromText(text){
+    if(!text) return '';
+    const m = text.match(/(?:^|\D)((19[5-9]\d|20[0-4]\d))(?:\D|$)/);
+    return m ? m[1] : '';
+}
+// 从当前页 DOM 提取年份
+function getMovieYear(){
+    const meta = document.querySelector('meta[name="description"]');
+    if(meta && meta.content){ const y = parseYearFromText(meta.content); if(y) return y; }
+    const og = document.querySelector('meta[property="og:title"],meta[property="og:description"]');
+    if(og && og.content){ const y = parseYearFromText(og.content); if(y) return y; }
+    const info = document.querySelector('.module-info-intro,.detail-info,.video-info,.play-info,.anthology-info');
+    if(info){ const y = parseYearFromText(info.textContent); if(y) return y; }
+    return parseYearFromText(document.body.innerText.slice(0,800)) || parseYearFromText(document.title);
+}
+// 从当前页 DOM 同步提取简介
+function getMovieIntroSync(){
+    const meta = document.querySelector('meta[name="description"]');
+    if(meta && meta.content && meta.content.length>8) return meta.content.replace(/^.*?(?=[\u4e00-\u9fa5a-zA-Z])/,'');
+    const og = document.querySelector('meta[property="og:description"]');
+    if(og && og.content && og.content.length>8) return og.content;
+    const intro = document.querySelector('.module-info-intro p,.detail-intro,.video-intro,.play-intro,.anthology-intro,.intro-content,.summary');
+    if(intro){ const t=(intro.textContent||'').trim().replace(/\s+/g,' '); if(t.length>8) return t; }
+    return '';
+}
+// 从详情页 HTML 字符串解析标题/简介/年份/海报/类型
+function parseDetailFromHtml(html){
+    const decode = (s)=> (s||'').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+    let title='', intro='', year='', poster='', genre='';
+    const mTitle = html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]{2,80})"/i)
+              || html.match(/<title>([^<]{2,80})<\/title>/i);
+    if(mTitle) title = decode(mTitle[1]).trim().replace(/\s+/g,' ');
+    const mDesc = html.match(/<meta[^>]+name="description"[^>]+content="([^"]{8,500})"/i)
+              || html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]{8,500})"/i);
+    if(mDesc) intro = decode(mDesc[1]).trim().replace(/\s+/g,' ');
+    if(!intro){
+        const mIntro = html.match(/<div[^>]+class="[^"]*intro[^"]*"[^>]*>([\s\S]{20,600}?)<\/div>/i)
+                   || html.match(/<p[^>]+class="[^"]*intro[^"]*"[^>]*>([\s\S]{20,600}?)<\/p>/i);
+        if(mIntro) intro = decode(mIntro[1].replace(/<[^>]+>/g,'')).trim().replace(/\s+/g,' ');
+    }
+    // 海报图：og:image 优先，其次详情页海报图标签
+    const mOgImg = html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i);
+    if(mOgImg) poster = decode(mOgImg[1]).trim();
+    if(!poster){
+        const mPoster = html.match(/<img[^>]+class="[^"]*poster[^"]*"[^>]+src="([^"]+)"/i)
+                    || html.match(/<div[^>]+class="[^"]*poster[^"]*"[^>]*>[\s\S]{0,200}?<img[^>]+src="([^"]+)"/i);
+        if(mPoster) poster = decode(mPoster[1]).trim();
+    }
+    // 类型/分类：从详情信息区提取"类型：xx"或分类链接文本
+    const mGenre = html.match(/类型[：:]\s*([\u4e00-\u9fa5]{1,8}(?:[\/、][\u4e00-\u9fa5]{1,8}){0,3})/)
+                || html.match(/<a[^>]+href="[^"]*genre[^"]*"[^>]*>([\u4e00-\u9fa5]{2,6})<\/a>/i)
+                || html.match(/<a[^>]+href="[^"]*category[^"]*"[^>]*>([\u4e00-\u9fa5]{2,6})<\/a>/i);
+    if(mGenre) genre = decode(mGenre[1]).trim().replace(/[\/、]/g,', ');
+    year = parseYearFromText(intro) || parseYearFromText(title);
+    return { title:title||'', intro:intro||'', year:year||'', poster:poster||'', genre:genre||'' };
+}
+
+// ==================== ★ 从 hhkan0.com 对应影片详情页提取海报 ★ ====================
+// 优先用当前 URL 中的影片 id 拼接 https://www.hhkan0.com/movie/{id}.html 抓取，
+// 通过 parseDetailFromHtml 解析 og:image / poster 图，并写入 poster_cache(键=影片标题)。
+// 返回解析到的海报绝对 URL；失败返回 ''。
+function fetchHhkanPoster(title, id){
+    return new Promise(function(resolve){
+        if(!id){ resolve(''); return; }
+        var url = 'https://www.hhkan0.com/movie/' + encodeURIComponent(id) + '.html';
+        try{
+            var xhr = new XMLHttpRequest();
+            xhr.timeout = 8000;
+            xhr.open('GET', url, true);
+            xhr.onload = function(){
+                if(xhr.status !== 200){ resolve(''); return; }
+                var d = parseDetailFromHtml(xhr.responseText);
+                var poster = d.poster || '';
+                if(poster && !/^https?:/i.test(poster)){
+                    // 相对路径补成 hhkan0.com 绝对地址
+                    poster = 'https://www.hhkan0.com' + (poster.charAt(0)==='/' ? '' : '/') + poster;
+                }
+                if(poster && title){ setPosterCache(title, poster); }
+                resolve(poster);
+            };
+            xhr.onerror = function(){ resolve(''); };
+            xhr.ontimeout = function(){ resolve(''); };
+            xhr.send();
+        }catch(e){ resolve(''); }
+    });
+}
+
+// 从当前页 DOM 同步提取海报图 URL
+function getMoviePosterSync(){
+    // 优先：从海报缓存按当前影片标题取（由 fetchHhkanPoster / startFetchPosterQueue 写入，值为 hhkan0.com 海报 URL）
+    var curTitle = (getMovieTitle() || '').trim();
+    if(curTitle){
+        var cache = getPosterCache();
+        var cached = cache[curTitle];
+        if(cached && /^https?:/i.test(cached)) return cached;
+    }
+    // 回退：当前页 DOM 探测 og:image / 各类 poster 图
+    var og = document.querySelector('meta[property="og:image"],meta[property="og:image:url"]');
+    if(og && og.content) return og.content;
+    var posterImg = document.querySelector('.module-info-poster img,.detail-poster img,.video-poster img,.play-poster img,.anthology-poster img,.poster img,.module-item-pic img');
+    if(posterImg && posterImg.src) return posterImg.src;
+    var firstImg = document.querySelector('.module-info img,.detail-info img');
+    if(firstImg && firstImg.src && !firstImg.src.includes('avatar') && !firstImg.src.includes('icon')) return firstImg.src;
+    return '';
+}
+// 从当前页 DOM 同步提取类型/分类
+function getMovieGenreSync(){
+    const info = document.querySelector('.module-info-intro,.detail-info,.video-info,.play-info,.anthology-info');
+    if(info){
+        const m = (info.textContent||'').match(/类型[：:]\s*([\u4e00-\u9fa5]{1,8}(?:[\/、][\u4e00-\u9fa5]{1,8}){0,3})/);
+        if(m) return m[1].trim().replace(/[\/、]/g,', ');
+    }
+    const catLink = document.querySelector('a[href*="genre"],a[href*="category"],a[href*="type"]');
+    if(catLink && catLink.textContent && catLink.textContent.trim().length<=8) return catLink.textContent.trim();
+    return '';
+}
+// 从当前 URL 解析影片 id
+function getCurrentMovieId(){
+    const m = location.href.match(/\/movie\/(\d+)\.html/)
+           || location.href.match(/\/play\/(\d+)(?:\/|$)/)
+           || location.href.match(/\/(?:detail|tv|anime|variety|short)\/(\d+)/);
+    return m ? m[1] : '';
+}
+// 异步抓取详情页补全简介/年份/标题
+function fetchMovieDetail(){
+    return new Promise((resolve)=>{
+        const id = getCurrentMovieId();
+        const url = id ? `https://www.hhkan0.com/movie/${id}.html` : '';
+        const fallback = ()=> resolve({ intro:getMovieIntroSync(), year:getMovieYear(), title:getMovieTitle(), poster:getMoviePosterSync(), genre:getMovieGenreSync() });
+        if(!url){ fallback(); return; }
+        try{
+            const xhr = new XMLHttpRequest();
+            xhr.timeout = 7000;
+            xhr.open('GET', url, true);
+            xhr.onload = function(){
+                if(xhr.status === 200){
+                    const d = parseDetailFromHtml(xhr.responseText);
+                    resolve({ intro:d.intro||getMovieIntroSync(), year:d.year||getMovieYear(), title:d.title||getMovieTitle(), poster:d.poster||getMoviePosterSync(), genre:d.genre||getMovieGenreSync() });
+                }else{ fallback(); }
+            };
+            xhr.onerror = ()=> fallback();
+            xhr.ontimeout = ()=> fallback();
+            xhr.send();
+        }catch(e){ fallback(); }
+    });
+}
 function parseEpisodeNumber(text){
     if(!text) return 0;
     const cnMap = {
@@ -1359,6 +1533,101 @@ function getActiveLineIndex(){
     const record = getSelectRecord();
     return record.lineIndex || 0;
 }
+// ========== 自动检测当前播放的线路 + 集数 ==========
+// 仅在进入播放页（出现 video 元素）后调用，避免无谓检测。
+// 返回值：{ found, lineIndex, lineName, episodeNum, episodeText } 或 null（提取失败）
+function detectCurrentPlay(){
+    try{
+        const lines = extractAllLines();
+        if(!lines || lines.length === 0) return null;
+        const curUrl = location.href.split('?')[0].split('#')[0];
+        // 1) 用当前 URL 精确匹配各线路的每一集
+        for(let li = 0; li < lines.length; li++){
+            const line = lines[li];
+            for(const ep of (line.episodes || [])){
+                const epUrl = (ep.url || '').split('?')[0].split('#')[0];
+                if(epUrl && epUrl === curUrl){
+                    return {
+                        found: true,
+                        lineIndex: li,
+                        lineName: line.name || ('线路'+(li+1)),
+                        episodeNum: ep.num || 0,
+                        episodeText: ep.text || ''
+                    };
+                }
+            }
+        }
+        // 2) URL 未精确命中：回退到当前激活的线路 tab + 页面标题/URL 推断集数
+        const activeIdx = getActiveLineIndex();
+        const line = lines[activeIdx] || lines[0];
+        const li = lines.indexOf(line);
+        // 从 document.title / h1 推断当前集数
+        const titleText = (document.title || '') + ' ' + ((document.querySelector('h1')||{}).textContent||'');
+        const inferredNum = parseEpisodeNumber(titleText) || parseEpisodeNumber(location.href);
+        // 在线路集中找 num 匹配的那一集
+        let matchedEp = null;
+        if(inferredNum > 0){
+            matchedEp = (line.episodes || []).find(e => e.num === inferredNum) || null;
+        }
+        return {
+            found: !!matchedEp,
+            lineIndex: li,
+            lineName: line.name || ('线路'+(li+1)),
+            episodeNum: matchedEp ? matchedEp.num : inferredNum,
+            episodeText: matchedEp ? matchedEp.text : ''
+        };
+    }catch(e){
+        console.warn('[自动检测] detectCurrentPlay 异常：', e);
+        return null;
+    }
+}
+// 将检测结果写入选择记录 + 弹出提示条
+function autoDetectAndNotify(){
+    // 仅在存在视频元素（即已进入播放页）时才检测
+    if(!hasVideoElement()) return;
+    const result = detectCurrentPlay();
+    if(!result) return;
+    // 写入选择记录（补全线路信息）
+    const recUpdate = { lineIndex: result.lineIndex, lineName: result.lineName };
+    if(result.episodeNum > 0){
+        recUpdate.episodeNum = result.episodeNum;
+        recUpdate.episodeText = result.episodeText || ('第'+result.episodeNum+'集');
+    }
+    saveSelectRecord(recUpdate);
+    // 弹出顶部检测提示条
+    showDetectBar(result);
+    // Toast 提示
+    if(typeof showFloatTip === 'function'){
+        const epPart = result.episodeNum > 0 ? (' · 第'+result.episodeNum+'集') : '';
+        showFloatTip('自动检测：'+result.lineName+epPart);
+    }
+    console.log('[自动检测] 线路='+result.lineName+' 集数='+(result.episodeNum||'-'));
+}
+// 顶部淡蓝检测提示条（自动 6 秒后消失，可手动关闭）
+function showDetectBar(result){
+    let bar = document.querySelector('#hhkan-detect-bar');
+    if(!bar){
+        bar = document.createElement('div');
+        bar.id = 'hhkan-detect-bar';
+        const fsEl = getFullscreenElement();
+        if(fsEl) fsEl.appendChild(bar);
+        else document.body.appendChild(bar);
+    }
+    const epPart = result.episodeNum > 0 ? (' · 第 <b>'+result.episodeNum+'</b> 集') : '';
+    bar.innerHTML = '🔍 自动检测：'+result.lineName+epPart+
+        ' <span class="hd-close" id="hd-close-btn">✕</span>';
+    // 触发重排以重新开始动画
+    bar.classList.remove('hd-show');
+    void bar.offsetWidth;
+    bar.classList.add('hd-show');
+    const closeBtn = bar.querySelector('#hd-close-btn');
+    if(closeBtn){
+        closeBtn.onclick = (e)=>{ e.stopPropagation(); bar.classList.remove('hd-show'); };
+    }
+    // 6 秒后自动隐藏
+    clearTimeout(bar._hideTimer);
+    bar._hideTimer = setTimeout(()=>{ bar.classList.remove('hd-show'); }, 6000);
+}
 function switchLineTab(index){
     const tabSelectors = ['.module-tab-item', '.tab-item', '.play-source', '.source-tab',
                           '.line-tab', '.num-tab', '.anthology-tab a',
@@ -1388,7 +1657,7 @@ function switchLineTab(index){
 function buildEpisodeModal(lines){
     const old = document.querySelector('#episode-modal-mask');
     if(old) old.remove();
-    if(!requestOpenModal('episode-modal-mask')) return;
+    if(typeof requestOpenModal==='function' && !requestOpenModal('episode-modal-mask')) return;
     const mask = document.createElement('div');
     mask.id = 'episode-modal-mask';
     const record = getSelectRecord();
@@ -1398,11 +1667,41 @@ function buildEpisodeModal(lines){
     const currentUrl = location.href;
     const currentDomain = location.hostname;
     const isMovie = lines.length > 0 && lines[0].isMovie;
+    // 影片元数据（同步先取，异步补全）
+    const _syncTitle = getMovieTitle();
+    const _syncYear  = getMovieYear();
+    const _syncIntro = getMovieIntroSync();
+    const _syncPoster = getMoviePosterSync();
+    const _syncGenre  = getMovieGenreSync();
+    const _dispTitle = _syncTitle || (isMovie ? '影片详情' : '选集详情');
+    const _dispYear  = _syncYear ? `（${_syncYear}）` : '';
+    const _dispIntro = _syncIntro ? _syncIntro : '简介加载中…';
+    const _posterHtml = _syncPoster
+        ? `<img class="ep-movie-poster-img" id="ep-movie-poster-img" src="${_syncPoster.replace(/"/g,'&quot;')}" alt="海报">`
+        : `<div class="ep-movie-poster-placeholder" id="ep-movie-poster-ph">🎬</div>`;
+    const _genreHtml = _syncGenre ? `<span class="ep-movie-genre" id="ep-movie-genre">${_syncGenre}</span>` : '';
+    // 【修复】默认 3 行省略；是否加 ep-intro-long 仅用于标记"内容较长"，不影响样式（样式由 CSS 控制）
+    const _introLong = (_syncIntro.length > 60) ? ' ep-intro-long' : '';
+    // 读取/初始化选集排序偏好（'asc'=正序 'desc'=倒序），持久化到 localStorage
+    const EP_ORDER_KEY = 'episode_order';
+    let _epOrder = 'asc';
+    try{ _epOrder = localStorage.getItem(EP_ORDER_KEY) || 'asc'; }catch(e){}
+    if(_epOrder !== 'asc' && _epOrder !== 'desc') _epOrder = 'asc';
+    const _orderLabel = _epOrder === 'desc' ? '倒序 ↑' : '正序 ↓';
     let html = `<div id="episode-modal-box">
         <div class="ep-header">
             <span class="ep-title">📋 ${isMovie ? '播放线路' : '选集列表'}</span>
             <span class="ep-count">共 <b>${totalEps}</b> 集 / ${lines.length} 条线路</span>
+            <button class="ep-order-btn" id="ep-order-btn" type="button" title="点击切换正序/倒序排列">${_orderLabel}</button>
             <button class="ep-close" id="ep-close-btn">✕</button>
+        </div>
+        <div class="ep-movie-card" id="ep-movie-card">
+            <div class="ep-movie-poster" id="ep-movie-poster">${_posterHtml}</div>
+            <div class="ep-movie-meta">
+                <div class="ep-movie-title" id="ep-movie-title" title="${_dispTitle.replace(/"/g,'&quot;')}">${_dispTitle} <span class="ep-movie-year" id="ep-movie-year">${_dispYear}</span> ${_genreHtml}</div>
+                <div class="ep-movie-intro${_introLong}" id="ep-movie-intro">${_dispIntro}</div>
+                <button class="ep-intro-toggle" id="ep-intro-toggle" type="button">展开 ▾</button>
+            </div>
         </div>
         <div class="ep-current-info">🌐 ${currentDomain} | 当前路径：${currentUrl.replace(location.origin,'')}</div>
         <div class="ep-record-info" id="ep-record-bar">📌 上次选择：<span id="ep-record-text">${record.lineName||'未选择'} | 第${record.episodeNum||'-'}集</span></div>`;
@@ -1434,7 +1733,94 @@ function buildEpisodeModal(lines){
     });
     html += `<div class="ep-footer">💡 ${isMovie ? '电影模式：每条线路1集，点击切换播放源' : '点击线路标签切换线路 | 点击选集跳转 | 悬浮球可拖动'}</div></div>`;
     mask.innerHTML = html;
-    const fsEl = getFullscreenElement();
+
+    /* ========== 【修复核心】按渲染后实际高度判定是否需要展开按钮 ========== */
+    const introEl = mask.querySelector('#ep-movie-intro');
+    const toggleBtn = mask.querySelector('#ep-intro-toggle');
+
+    // 通过比较 scrollHeight(内容真实高度) 与 clientHeight(可视高度) 判断是否被省略
+    const updateToggleState = () => {
+        if(!introEl || !toggleBtn) return;
+        // 临时放开限制测量真实内容高度
+        const origClamp = introEl.style.webkitLineClamp;
+        introEl.style.webkitLineClamp = 'unset';
+        const fullH = introEl.scrollHeight;
+        introEl.style.webkitLineClamp = origClamp; // 恢复（CSS 默认 3 行）
+        const needsToggle = fullH > introEl.clientHeight + 2; // +2 容差
+        toggleBtn.hidden = !needsToggle;
+        if(!needsToggle){
+            introEl.classList.remove('ep-intro-expanded');
+            toggleBtn.textContent = '展开 ▾';
+        }
+    };
+
+    // 初始渲染后判定一次（简介为"加载中"时通常无需展开）
+    if(introEl && toggleBtn){
+        setTimeout(updateToggleState, 0);
+    }
+
+    // 异步补全影片详情（简介/年份/标题/海报/类型），优先从详情页抓取
+    fetchMovieDetail().then(md => {
+        const tEl = mask.querySelector('#ep-movie-title');
+        const yEl = mask.querySelector('#ep-movie-year');
+        const iEl = mask.querySelector('#ep-movie-intro');
+        const gEl = mask.querySelector('#ep-movie-genre');
+        const pEl = mask.querySelector('#ep-movie-poster');
+        if(md.title && tEl){
+            const cur = (tEl.childNodes[0] && tEl.childNodes[0].nodeValue) || tEl.textContent || '';
+            if(!cur.trim() || cur.trim()==='影片详情' || cur.trim()==='选集详情'){
+                tEl.childNodes[0] ? (tEl.childNodes[0].nodeValue = md.title) : (tEl.textContent = md.title);
+            }
+        }
+        if(md.year && yEl && !yEl.textContent){ yEl.textContent = '（'+md.year+'）'; }
+        if(md.intro && iEl){
+            const cur = (iEl.textContent||'').trim();
+            if(cur==='简介加载中…' || cur==='' || cur.length<md.intro.length){
+                iEl.textContent = md.intro;
+                // 【修复】不再加无效的 ep-intro-long 类，改为触发按高度重判
+                // 简介内容变化后重新判定按钮显隐
+                setTimeout(updateToggleState, 0);
+            }
+        }
+        if(md.genre && gEl && !gEl.textContent){ gEl.textContent = md.genre; }
+        else if(md.genre && !gEl){
+            const titleEl = mask.querySelector('#ep-movie-title');
+            if(titleEl && !titleEl.querySelector('.ep-movie-genre')){
+                const sp = document.createElement('span');
+                sp.className = 'ep-movie-genre';
+                sp.id = 'ep-movie-genre';
+                sp.textContent = md.genre;
+                titleEl.appendChild(sp);
+            }
+        }
+        // 【修复】海报：优先用 hhkan0.com 对应影片详情页抓取的海报（fetchHhkanPoster 写入 poster_cache），
+        // 拿到后无条件更新 #ep-movie-poster，确保选集弹窗图片来自 hhkan0.com 该影片。
+        var posterFromHhkan = '';
+        try{ posterFromHhkan = (getPosterCache() || {})[(getMovieTitle()||'').trim()] || ''; }catch(e){}
+        var posterToUse = posterFromHhkan || md.poster || '';
+        if(posterToUse && pEl){
+            var imgTag = '<img class="ep-movie-poster-img" src="' + posterToUse.replace(/"/g,'&quot;') + '" alt="海报">';
+            // 若缓存未命中，则现场抓取 hhkan0 详情页补充
+            if(!posterFromHhkan){
+                fetchHhkanPoster((getMovieTitle()||'').trim(), getCurrentMovieId()).then(function(u){
+                    if(u){ pEl.innerHTML = '<img class="ep-movie-poster-img" src="' + u.replace(/"/g,'&quot;') + '" alt="海报">'; }
+                }).catch(function(){});
+            }
+            pEl.innerHTML = imgTag;
+        }
+    }).catch(()=>{});
+
+    // 简介展开/收起（点击切换 ep-intro-expanded）
+    if(toggleBtn && introEl){
+        toggleBtn.addEventListener('click', (e)=>{
+            e.preventDefault();
+            e.stopPropagation();
+            const expanded = introEl.classList.toggle('ep-intro-expanded');
+            toggleBtn.textContent = expanded ? '收起 ▴' : '展开 ▾';
+        });
+    }
+
+    const fsEl = typeof getFullscreenElement==='function' ? getFullscreenElement() : null;
     if(fsEl){
         fsEl.appendChild(mask);
         fsEl.style.overflow = 'visible';
@@ -1444,6 +1830,73 @@ function buildEpisodeModal(lines){
     mask.querySelector('#ep-close-btn').onclick = (e)=>{ e.stopPropagation(); mask.remove(); };
     mask.onclick = (e)=>{ if(e.target===mask) mask.remove(); };
     mask.querySelector('#episode-modal-box').addEventListener('click',e=>e.stopPropagation());
+
+    /* ========== 选集正序/倒序切换 + 自动滚动到当前集 ========== */
+    const orderBtn = mask.querySelector('#ep-order-btn');
+    // 对指定线路的面板按当前排序状态排列其中的 .ep-item（暴露到 window 供面板重建后调用）
+    const applyOrderToPanel = window.__hhkanApplyEpOrder = (panel, order) => {
+        if(!panel) return;
+        const grid = panel.querySelector('.ep-grid');
+        if(!grid) return;
+        const items = Array.from(grid.querySelectorAll('.ep-item'));
+        if(items.length === 0) return;
+        // 依据 data-num 排序：正序升序，倒序降序
+        items.sort((a,b)=>{
+            const an = parseInt(a.dataset.num)||0, bn = parseInt(b.dataset.num)||0;
+            return order === 'desc' ? (bn - an) : (an - bn);
+        });
+        items.forEach(it => grid.appendChild(it)); // 追加即重排
+        // 重建后重新绑定集数按钮的点击事件（沿用已有的 onEpItemClick）
+        panel.querySelectorAll('.ep-item').forEach(item => {
+            item.addEventListener('click', (typeof onEpItemClick !== 'undefined' ? onEpItemClick : ()=>{}));
+        });
+        // 重新标记"上次选择"的集数为选中态
+        try{
+            const rec = (typeof getSelectRecord==='function') ? getSelectRecord() : {};
+            if(rec.episodeNum > 0){
+                panel.querySelectorAll('.ep-item').forEach(i=>i.classList.remove('ep-selected'));
+                const sel = panel.querySelector(`.ep-item[data-num="${rec.episodeNum}"]`);
+                if(sel) sel.classList.add('ep-selected');
+            }
+        }catch(e){}
+    };
+    // 读取当前排序状态的辅助（供外部调用）
+    window.__hhkanGetEpOrder = () => _epOrder;
+    // 初始化：对当前激活面板应用已保存的排序
+    const curPanel = mask.querySelector(`.ep-line-panel[data-idx="${activeIdx}"]`);
+    applyOrderToPanel(curPanel, _epOrder);
+    // 排序按钮点击：切换排序并持久化，对当前可见面板重排，并自动滚动到当前播放集
+    if(orderBtn){
+        orderBtn.addEventListener('click', (e)=>{
+            e.preventDefault(); e.stopPropagation();
+            _epOrder = (_epOrder === 'asc') ? 'desc' : 'asc';
+            try{ localStorage.setItem(EP_ORDER_KEY, _epOrder); }catch(e){}
+            orderBtn.textContent = _epOrder === 'desc' ? '倒序 ↑' : '正序 ↓';
+            const visPanel = Array.from(mask.querySelectorAll('.ep-line-panel')).find(p => p.style.display !== 'none') || curPanel;
+            applyOrderToPanel(visPanel, _epOrder);
+            // 排序切换后，等待 DOM 重排完成再滚动到当前集
+            setTimeout(scrollToCurrentEp, 50);
+            if(typeof showFloatTip==='function') showFloatTip('已切换为：' + (_epOrder==='desc'?'倒序排列':'正序排列'));
+        });
+    }
+
+    // 自动滚动到当前正在播放的集数（基于选择记录 episodeNum）
+    const scrollToCurrentEp = () => {
+        const rec = (typeof getSelectRecord==='function') ? getSelectRecord() : {};
+        const targetNum = rec.episodeNum;
+        if(!targetNum || targetNum <= 0) return;
+        const visPanel = Array.from(mask.querySelectorAll('.ep-line-panel')).find(p => p.style.display !== 'none') || curPanel;
+        if(!visPanel) return;
+        const target = visPanel.querySelector(`.ep-item[data-num="${targetNum}"]`);
+        if(target){
+            target.scrollIntoView({behavior:'smooth', block:'center'});
+            // 高亮提示当前集（短暂加 ep-scroll-hint 类）
+            target.classList.add('ep-scroll-hint');
+            setTimeout(()=>target.classList.remove('ep-scroll-hint'), 1800);
+        }
+    };
+    // 弹窗渲染完成后执行滚动（等待面板/集数按钮就绪）
+    setTimeout(scrollToCurrentEp, 120);
     mask.querySelectorAll('.ep-line-tab').forEach(tab => {
         tab.onclick = (e)=>{
             e.preventDefault();
@@ -1451,19 +1904,18 @@ function buildEpisodeModal(lines){
             const idx = parseInt(tab.dataset.idx);
             const lineName = lines[idx] ? lines[idx].name : '线路'+(idx+1);
             saveSelectRecord({ lineIndex: idx, lineName: lineName });
-            showFloatTip(`正在切换到：${lineName}...`);
-            switchLineTab(idx);
+            if(typeof showFloatTip==='function') showFloatTip(`正在切换到：${lineName}...`);
+            if(typeof switchLineTab==='function') switchLineTab(idx);
             mask.querySelectorAll('.ep-line-tab').forEach(t=>t.classList.remove('ep-line-active'));
             tab.classList.add('ep-line-active');
             mask.querySelectorAll('.ep-line-panel').forEach(p=>p.style.display='none');
             const panel = mask.querySelector(`.ep-line-panel[data-idx="${idx}"]`);
             if(panel) panel.style.display = '';
-            const recordText = document.querySelector('#ep-record-text');
+            const recordText = mask.querySelector('#ep-record-text');
             if(recordText) recordText.textContent = `${lineName} | 未选择集数`;
-            // 设置自动全屏标志，切换线路后自动全屏
-            sessionStorage.setItem(AUTO_FS_KEY, "1");
+            try{ sessionStorage.setItem('hhkan_auto_fullscreen','1'); }catch(e){}
             setTimeout(()=>{
-                const newLines = extractAllLines();
+                const newLines = typeof extractAllLines==='function' ? extractAllLines() : lines;
                 if(newLines.length > 0 && newLines[idx]){
                     const newPanel = mask.querySelector(`.ep-line-panel[data-idx="${idx}"]`);
                     if(newPanel){
@@ -1481,14 +1933,17 @@ function buildEpisodeModal(lines){
                         });
                         panelHtml += `</div>`;
                         newPanel.innerHTML = panelHtml;
+                        // 面板重建后按当前保存的排序状态重排集数
+                        if(typeof applyOrderToPanel === 'function') applyOrderToPanel(newPanel, _epOrder);
                         newPanel.querySelectorAll('.ep-item').forEach(item => {
                             item.addEventListener('click', onEpItemClick);
                         });
-                        showFloatTip(`已切换至${line.name}，共${line.total}集`);
+                        // 线路切换 + 排序重排后，自动滚动到当前播放集
+                        setTimeout(scrollToCurrentEp, 50);
+                        if(typeof showFloatTip==='function') showFloatTip(`已切换至${line.name}，共${line.total}集`);
                     }
                 }
-                // 线路切换完成后尝试自动全屏
-                tryAutoFullscreen();
+                if(typeof tryAutoFullscreen==='function') tryAutoFullscreen();
             }, 1000);
         };
     });
@@ -1505,16 +1960,13 @@ function buildEpisodeModal(lines){
                 episodeText: epText,
                 url: item.href
             });
-            const recordText = document.querySelector('#ep-record-text');
+            const recordText = mask.querySelector('#ep-record-text');
             if(recordText) recordText.textContent = `${lineName} | 第${num}集`;
             mask.querySelectorAll('.ep-item').forEach(i => i.classList.remove('ep-selected'));
             item.classList.add('ep-selected');
-            showFloatTip(`正在跳转并全屏播放：${lineName} - 第${num}集`);
-            // 设置自动全屏标志，跳转后自动进入全屏
-            sessionStorage.setItem(AUTO_FS_KEY, "1");
-            setTimeout(()=>{
-                location.href = item.href;
-            }, 300);
+            if(typeof showFloatTip==='function') showFloatTip(`正在跳转并全屏播放：${lineName} - 第${num}集`);
+            try{ sessionStorage.setItem('hhkan_auto_fullscreen','1'); }catch(e){}
+            setTimeout(()=>{ location.href = item.href; }, 300);
             e.preventDefault();
         });
     });
@@ -1868,6 +2320,8 @@ function initFloatBallEvents(ball){
             }else if(action === 'next'){
                 navigateEpisode(1);
             }else if(action === 'episodes'){
+                // 打开选集前先自动检测一次，使"上次选择"栏立即反映当前线路/集数
+                autoDetectAndNotify();
                 const lines = extractAllLines();
                 if(lines.length === 0){
                     showFloatTip('未检测到选集列表，请确认当前在播放页');
@@ -2720,7 +3174,48 @@ function buildUI() {
 #fb-toast.fb-toast-show{
     opacity:1;
 }
+/* ========== 自动检测提示条 ========== */
+#hhkan-detect-bar{
+    position:fixed;left:50%;top:36px;transform:translateX(-50%) translateY(-16px);
+    z-index:2147483645;
+    background:linear-gradient(135deg,rgba(30,144,255,.92),rgba(0,200,180,.92));
+    color:#fff;font-size:13px;font-weight:600;letter-spacing:.5px;
+    padding:8px 18px;border-radius:20px;box-shadow:0 6px 22px rgba(0,120,212,.35);
+    display:flex;align-items:center;gap:8px;pointer-events:auto;
+    opacity:0;transition:opacity .35s ease, transform .35s ease;
+    max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#hhkan-detect-bar.hd-show{opacity:1;transform:translateX(-50%) translateY(0);}
+#hhkan-detect-bar .hd-close{
+    cursor:pointer;font-size:12px;opacity:.85;margin-left:4px;padding:0 2px;
+}
+#hhkan-detect-bar .hd-close:hover{opacity:1;}
 /* ========== 选集弹窗 ========== */
+/* 正序/倒序切换按钮 */
+.ep-order-btn{
+    margin-left:auto;
+    margin-right:6px;
+    padding:4px 12px;
+    font-size:12px;
+    color:#e65100;
+    background:#fff3e0;
+    border:1px solid #ffcc80;
+    border-radius:14px;
+    cursor:pointer;
+    transition:background .2s, color .2s;
+    white-space:nowrap;
+}
+.ep-order-btn:hover{ background:#ffe0b2; color:#bf360c; }
+/* 自动滚动到当前集时的高亮提示 */
+.ep-item.ep-scroll-hint{
+    animation:epScrollHint 1.8s ease;
+    box-shadow:0 0 0 2px #ff9800, 0 0 12px rgba(255,152,0,.6);
+}
+@keyframes epScrollHint{
+    0%  { background:#ff9800; color:#fff; transform:scale(1.06); box-shadow:0 0 0 2px #ff9800, 0 0 14px rgba(255,152,0,.7); }
+    60% { background:#ffb74d; color:#fff; }
+    100%{ transform:scale(1); }
+}
 #episode-modal-mask{
     position:fixed;
     inset:0;
@@ -2804,6 +3299,112 @@ function buildUI() {
     border-bottom:1px solid #eee;
     word-break:break-all;
 }
+/* 影片信息卡：标题 + 年份 + 简介 */
+.ep-movie-card{
+    display:flex;
+    gap:12px;
+    padding:12px 18px;
+    background:linear-gradient(135deg,#fff8f0 0%,#fff3e0 100%);
+    border-bottom:1px solid #ffe0b2;
+}
+.ep-movie-poster{
+    flex:0 0 60px;
+    width:60px;
+    align-self:flex-start;
+}
+.ep-movie-poster-img{
+    width:60px;height:84px;
+    object-fit:cover;
+    border-radius:8px;
+    display:block;
+    box-shadow:0 2px 8px rgba(255,112,67,0.25);
+    background:#eee;
+}
+.ep-movie-poster-placeholder{
+    width:60px;height:84px;
+    border-radius:8px;
+    background:linear-gradient(135deg,#ff8a65,#ff7043);
+    color:#fff;
+    font-size:28px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 2px 8px rgba(255,112,67,0.25);
+}
+.ep-movie-meta{
+    flex:1;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+}
+.ep-movie-title{
+    font-size:16px;
+    font-weight:bold;
+    color:#222;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    display:flex;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:6px;
+}
+.ep-movie-year{
+    font-size:13px;
+    font-weight:normal;
+    color:#e65100;
+    margin-left:0;
+}
+.ep-movie-genre{
+    font-size:11px;
+    font-weight:normal;
+    color:#fff;
+    background:#ff8a65;
+    padding:1px 7px;
+    border-radius:10px;
+    white-space:nowrap;
+}
+.ep-movie-intro{
+    font-size:12px;
+    color:#666;
+    line-height:1.5;
+    display:-webkit-box;
+    -webkit-line-clamp:3;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    transition:all 0.25s;
+}
+.ep-movie-intro.ep-intro-long{ /* 兼容：标记内容较长，实际显隐由 JS 按渲染高度判定 */ }
+.ep-movie-intro.ep-intro-expanded{
+    -webkit-line-clamp:unset;
+    max-height:none;
+    overflow:visible;
+    text-overflow:clip;
+    white-space:pre-wrap;
+    word-break:break-word;
+}
+.ep-movie-intro.ep-intro-expanded{
+    -webkit-line-clamp:unset;
+    max-height:none;
+    overflow:auto;
+    white-space:pre-wrap;
+    word-break:break-word;
+}
+.ep-intro-toggle{
+    align-self:flex-start;
+    font-size:11px;
+    color:#e65100;
+    background:transparent;
+    border:1px solid #ffccbc;
+    border-radius:10px;
+    padding:1px 8px;
+    cursor:pointer;
+    margin-top:2px;
+}
+.ep-intro-toggle:hover{ background:#fff3e0; }
+.ep-intro-toggle[hidden]{ display:none; }
 .ep-record-info{
     padding:6px 18px;
     font-size:12px;
