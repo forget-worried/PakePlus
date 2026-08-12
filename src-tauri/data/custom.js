@@ -169,14 +169,19 @@ waitDomReady(()=>{
 const PLAYER_SETTING_KEY = "pake_player_settings";
 function getPlayerSettings(){
     const def = {
-        skipIntro: 0,
-        skipOutro: 0,
-        videoFit: "default"
+        videoFit: "default",
+        skipIntro: 0,   // 跳过片头秒数（0~900，即最大15分钟）
+        skipOutro: 0     // 跳过片尾秒数（0~900，即最大15分钟）
     }
     const str = localStorage.getItem(PLAYER_SETTING_KEY);
     if(!str) return {...def};
     try{
-        return {...def, ...JSON.parse(str)};
+        const parsed = {...def, ...JSON.parse(str)};
+        // 取值范围保护：0~900 秒（最大15分钟）
+        const clampSec = v => Math.max(0, Math.min(900, parseInt(v,10)||0));
+        parsed.skipIntro = clampSec(parsed.skipIntro);
+        parsed.skipOutro = clampSec(parsed.skipOutro);
+        return parsed;
     }catch(e){
         return {...def};
     }
@@ -218,21 +223,41 @@ function bindVideoPlayer(videoEl){
     handledVideoSet.add(videoEl);
     const setting = getPlayerSettings();
     applyVideoFit(videoEl, setting.videoFit);
+    // ---- 跳过片头：视频就绪后若当前进度仍在片头范围内，seek 到片头结束位置 ----
+    const intro = Math.max(0, Math.min(900, parseInt(setting.skipIntro,10)||0));
+    const outro = Math.max(0, Math.min(900, parseInt(setting.skipOutro,10)||0));
+    let introDone = false;
+    const trySkipIntro = ()=>{
+        if(introDone) return;
+        if(!intro) { introDone = true; return; }
+        if(videoEl.readyState >= 1 && isFinite(videoEl.duration) && videoEl.duration > intro + 1){
+            if(videoEl.currentTime < intro){
+                try{ videoEl.currentTime = intro; introDone = true;
+                    console.log('[播放器设置] ⏩ 已跳过片头 '+intro+' 秒');
+                }catch(e){}
+            }else{ introDone = true; }
+        }
+    };
+    videoEl.addEventListener('loadedmetadata', ()=>{ trySkipIntro(); });
+    videoEl.addEventListener('durationchange', ()=>{ trySkipIntro(); });
     videoEl.addEventListener('timeupdate', ()=>{
-        const s = getPlayerSettings();
-        const cur = videoEl.currentTime;
-        const dur = videoEl.duration;
-        if(!dur || isNaN(dur)) return;
-        // 跳过片头：仅当片头时长小于视频总时长时才生效，避免短视频被误跳
-        if(s.skipIntro > 0 && s.skipIntro < dur && cur < s.skipIntro){
-            videoEl.currentTime = s.skipIntro;
+        if(!introDone) trySkipIntro();
+        // ---- 跳过片尾：剩余时间 <= 设定值时自动跳下一集 ----
+        if(outro && isFinite(videoEl.duration) && videoEl.duration > outro + 1){
+            const remain = videoEl.duration - videoEl.currentTime;
+            if(remain <= outro && !videoEl._hhkanOutroFired){
+                videoEl._hhkanOutroFired = true;
+                console.log('[播放器设置] ⏭️ 片尾倒计时到，自动下一集');
+                if(typeof window.gotoNextEpisode === 'function'){
+                    window.gotoNextEpisode();
+                }else if(typeof navigateEpisode === 'function'){
+                    navigateEpisode(1);
+                }
+            }
         }
-        // 跳过片尾：仅当片尾时长小于视频总时长时生效；
-        // 同时当剩余时间进入片尾区间时跳到末尾前 0.01s 触发结束
-        if(s.skipOutro > 0 && s.skipOutro < dur && (dur - cur) <= s.skipOutro){
-            videoEl.currentTime = dur - 0.01;
-        }
-    })
+    }, true);
+    // 切换视频源时重置片尾触发标记
+    videoEl.addEventListener('loadedmetadata', ()=>{ videoEl._hhkanOutroFired = false; });
 }
 function watchVideoElements(){
     if(videoObserver) videoObserver.disconnect();
@@ -1352,7 +1377,7 @@ function getMovieIntroSync(){
 }
 // 从详情页 HTML 字符串解析标题/简介/年份/海报/类型
 function parseDetailFromHtml(html){
-    const decode = (s)=> (s||'').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+    const decode = (s)=> (s||'').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/"/g,'"').replace(/&#39;/g,"'");
     let title='', intro='', year='', poster='', genre='';
     const mTitle = html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]{2,80})"/i)
               || html.match(/<title>([^<]{2,80})<\/title>/i);
@@ -1677,7 +1702,7 @@ function buildEpisodeModal(lines){
     const _dispYear  = _syncYear ? `（${_syncYear}）` : '';
     const _dispIntro = _syncIntro ? _syncIntro : '简介加载中…';
     const _posterHtml = _syncPoster
-        ? `<img class="ep-movie-poster-img" id="ep-movie-poster-img" src="${_syncPoster.replace(/"/g,'&quot;')}" alt="海报">`
+        ? `<img class="ep-movie-poster-img" id="ep-movie-poster-img" src="${_syncPoster.replace(/"/g,'"')}" alt="海报">`
         : `<div class="ep-movie-poster-placeholder" id="ep-movie-poster-ph">🎬</div>`;
     const _genreHtml = _syncGenre ? `<span class="ep-movie-genre" id="ep-movie-genre">${_syncGenre}</span>` : '';
     // 【修复】默认 3 行省略；是否加 ep-intro-long 仅用于标记"内容较长"，不影响样式（样式由 CSS 控制）
@@ -1698,7 +1723,7 @@ function buildEpisodeModal(lines){
         <div class="ep-movie-card" id="ep-movie-card">
             <div class="ep-movie-poster" id="ep-movie-poster">${_posterHtml}</div>
             <div class="ep-movie-meta">
-                <div class="ep-movie-title" id="ep-movie-title" title="${_dispTitle.replace(/"/g,'&quot;')}">${_dispTitle} <span class="ep-movie-year" id="ep-movie-year">${_dispYear}</span> ${_genreHtml}</div>
+                <div class="ep-movie-title" id="ep-movie-title" title="${_dispTitle.replace(/"/g,'"')}">${_dispTitle} <span class="ep-movie-year" id="ep-movie-year">${_dispYear}</span> ${_genreHtml}</div>
                 <div class="ep-movie-intro${_introLong}" id="ep-movie-intro">${_dispIntro}</div>
                 <button class="ep-intro-toggle" id="ep-intro-toggle" type="button">展开 ▾</button>
             </div>
@@ -1799,11 +1824,11 @@ function buildEpisodeModal(lines){
         try{ posterFromHhkan = (getPosterCache() || {})[(getMovieTitle()||'').trim()] || ''; }catch(e){}
         var posterToUse = posterFromHhkan || md.poster || '';
         if(posterToUse && pEl){
-            var imgTag = '<img class="ep-movie-poster-img" src="' + posterToUse.replace(/"/g,'&quot;') + '" alt="海报">';
+            var imgTag = '<img class="ep-movie-poster-img" src="' + posterToUse.replace(/"/g,'"') + '" alt="海报">';
             // 若缓存未命中，则现场抓取 hhkan0 详情页补充
             if(!posterFromHhkan){
                 fetchHhkanPoster((getMovieTitle()||'').trim(), getCurrentMovieId()).then(function(u){
-                    if(u){ pEl.innerHTML = '<img class="ep-movie-poster-img" src="' + u.replace(/"/g,'&quot;') + '" alt="海报">'; }
+                    if(u){ pEl.innerHTML = '<img class="ep-movie-poster-img" src="' + u.replace(/"/g,'"') + '" alt="海报">'; }
                 }).catch(function(){});
             }
             pEl.innerHTML = imgTag;
@@ -2741,6 +2766,12 @@ function buildUI() {
 .setting-group input[type="range"]{
     width:100%;
     margin-top:4px;
+}
+.setting-group label .setting-val{
+    float:right;
+    font-weight:normal;
+    font-size:12.5px;
+    color:#5b4bff;
 }
 .setting-desc{
     font-size:12px;
@@ -3753,7 +3784,7 @@ function renderRecommendContent(mask, recData){
             if(rankNum===1) rankClass="rank-1";
             else if(rankNum===2) rankClass="rank-2";
             else if(rankNum===3) rankClass="rank-3";
-            block += `<div class="rec-item rec-dynamic" data-title="${item.title.replace(/"/g,'&quot;')}" data-score="${item.doubanScore}">
+            block += `<div class="rec-item rec-dynamic" data-title="${item.title.replace(/"/g,'"')}" data-score="${item.doubanScore}">
                 <div style="display:flex;flex-direction:column;gap:2px;">
                     <div>
                         <span class="${rankClass}">${rankNum}.</span>
@@ -3993,7 +4024,7 @@ function renderPlaylist(mask){
     let html = '';
     files.forEach((f, idx) => {
         const playingCls = idx === localPlayerState.currentIndex ? 'lp-playing' : '';
-        const name = f.name.replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        const name = f.name.replace(/</g, '&lt;').replace(/"/g, '"');
         html += `<div class="lp-playlist-item ${playingCls}" data-idx="${idx}">
             <span class="lp-item-icon">${idx === localPlayerState.currentIndex ? '▶️' : '🎞️'}</span>
             <span class="lp-item-name" title="${name}">${name}</span>
@@ -4137,6 +4168,10 @@ function openPlayerSettingModal(fromLeft){
     const setting = getPlayerSettings();
     const mask = document.createElement('div');
     mask.id = 'player-setting-mask';
+    // 片头/片尾秒数（0~900，最大15分钟）
+    const intro = Math.max(0, Math.min(900, parseInt(setting.skipIntro,10)||0));
+    const outro = Math.max(0, Math.min(900, parseInt(setting.skipOutro,10)||0));
+    const fmt = s => s>0 ? `${Math.floor(s/60)}分${s%60}秒` : '关闭';
     let html = `<div id="player-setting-box">
         <h3>⚙ 播放器设置</h3>`;
     html += `<div class="setting-group">
@@ -4155,15 +4190,17 @@ function openPlayerSettingModal(fromLeft){
         html += `<button class="${active}" data-fit="${f.k}">${f.t}</button>`;
     });
     html += `</div></div>`;
+    // ---- 跳过片头 ----
     html += `<div class="setting-group">
-        <label>⏩ 跳过片头（秒）</label>
-        <input type="range" min="0" max="600" step="10" value="${setting.skipIntro}" id="set-skip-intro">
-        <div class="setting-desc">当前值：<span id="skip-intro-val">${setting.skipIntro}</span> 秒（最长 10 分钟 = 600 秒）</div>
+        <label>⏩ 跳过片头（秒）<span class="setting-val" id="intro-val">${fmt(intro)}</span></label>
+        <input type="range" id="intro-range" min="0" max="900" step="10" value="${intro}">
+        <div class="setting-desc">片头 N 秒后自动跳过。范围 0~900 秒（15 分钟）</div>
     </div>`;
+    // ---- 跳过片尾 ----
     html += `<div class="setting-group">
-        <label>⏭️ 跳过片尾（秒）</label>
-        <input type="range" min="0" max="600" step="10" value="${setting.skipOutro}" id="set-skip-outro">
-        <div class="setting-desc">当前值：<span id="skip-outro-val">${setting.skipOutro}</span> 秒（视频最后N秒自动跳过，最长 10 分钟 = 600 秒）</div>
+        <label>⏭️ 跳过片尾（秒）<span class="setting-val" id="outro-val">${fmt(outro)}</span></label>
+        <input type="range" id="outro-range" min="0" max="900" step="10" value="${outro}">
+        <div class="setting-desc">剩余 N 秒时自动播放下一集。范围 0~900 秒（15 分钟）</div>
     </div>`;
     html += `<div class="setting-buttons">
         <button id="setting-save-btn">保存设置</button>
@@ -4181,24 +4218,25 @@ function openPlayerSettingModal(fromLeft){
     const fsEl = getFullscreenElement();
     if(fsEl) fsEl.appendChild(mask);
     else document.body.appendChild(mask);
+    // 片头/片尾滑块实时显示（秒 -> X分X秒 / 关闭）
+    const _fmt = s => s>0 ? `${Math.floor(s/60)}分${s%60}秒` : '关闭';
+    const introRange = mask.querySelector('#intro-range');
+    const outroRange = mask.querySelector('#outro-range');
+    const introVal = mask.querySelector('#intro-val');
+    const outroVal = mask.querySelector('#outro-val');
+    if(introRange && introVal) introRange.addEventListener('input', ()=>{ introVal.textContent = _fmt(+introRange.value); });
+    if(outroRange && outroVal) outroRange.addEventListener('input', ()=>{ outroVal.textContent = _fmt(+outroRange.value); });
     mask.querySelectorAll('.fit-buttons button').forEach(btn=>{
         btn.onclick = ()=>{
             mask.querySelectorAll('.fit-buttons button').forEach(b=>b.classList.remove('fit-active'));
             btn.classList.add('fit-active');
         };
     });
-    const introSlider = mask.querySelector('#set-skip-intro');
-    const outroSlider = mask.querySelector('#set-skip-outro');
-    introSlider.oninput = ()=> mask.querySelector('#skip-intro-val').textContent = introSlider.value;
-    outroSlider.oninput = ()=> mask.querySelector('#skip-outro-val').textContent = outroSlider.value;
     mask.querySelector('#setting-save-btn').onclick = ()=>{
         const fitBtn = mask.querySelector('.fit-buttons button.fit-active');
         const fit = fitBtn ? fitBtn.dataset.fit : 'default';
-        // 钳制在 0~600 秒（最长 10 分钟）
-        let intro = parseInt(introSlider.value) || 0;
-        let outro = parseInt(outroSlider.value) || 0;
-        if(intro < 0) intro = 0; if(intro > 600) intro = 600;
-        if(outro < 0) outro = 0; if(outro > 600) outro = 600;
+        const intro = Math.max(0, Math.min(900, parseInt(introRange?introRange.value:0,10)||0));
+        const outro = Math.max(0, Math.min(900, parseInt(outroRange?outroRange.value:0,10)||0));
         savePlayerSettings({videoFit:fit, skipIntro:intro, skipOutro:outro});
         // 仅对站点播放器 video 应用画面比例，不影响本地播放器
         document.querySelectorAll('video').forEach(v=>{
@@ -4206,7 +4244,7 @@ function openPlayerSettingModal(fromLeft){
                 applyVideoFit(v, fit);
             }
         });
-        showFloatTip('设置已保存');
+        showFloatTip('设置已保存（片头/片尾/比例已生效）');
         setTimeout(()=>mask.remove(), 800);
     };
     mask.onclick = (e)=>{ if(e.target===mask) mask.remove(); };
@@ -4406,4 +4444,594 @@ setTimeout(()=>{
         document.dispatchEvent(evt);
     }
 },1500);
-});
+
+/* ============================================================
+ * hhkan0.com 体验增强模块（独立，可注入到「好好看进阶五.JS」末尾）
+ * 功能：
+ *  1. 片尾到点自动跳转下一集（下一集优先复用 navigateEpisode，自动识别当前线路）
+ *  2. 全局键盘快捷键（68 / 75 配列适配；全屏快捷键仅在影片有画面时生效）
+ *  3. 观看历史记录 + 进度百分比 + 任务栏「继续观看」入口（单条删除 + 清空全部）
+ *  4. 任务栏「⚙ 全局设置」弹窗（集中管理参数，实时存 localStorage）
+ *  5. 进入播放页自动全屏（严格：仅当影片已渲染出画面后才请求全屏）
+ * 依赖：原脚本已暴露的 getVideoBounds / showFloatTip / ensureFloatBall /
+ *       saveSelectRecord / getSelectRecord / extractAllLines / navigateEpisode 等
+ *      （尽力兼容，缺失不报错）
+ * 存储 key：hhkan_enhance_settings / hhkan_watch_history
+ * ============================================================ */
+(function () {
+    'use strict';
+    const SET_KEY = 'hhkan_enhance_settings';
+    const HIST_KEY = 'hhkan_watch_history';
+    const BAR_H = (window.BAR_HEIGHT || 48);
+
+    // ---------- 配置（带默认值）----------
+    function loadSettings() {
+        const def = {
+            autoNext: true,        // 片尾到点（视频自然结束）是否自动跳下一集
+            keysEnabled: true      // 快捷键总开关
+        };
+        try {
+            const s = JSON.parse(localStorage.getItem(SET_KEY) || '{}');
+            // 兼容旧版缓存：移除已废弃的 skipIntro / skipOutro / autoFullscreen 字段
+            delete s.skipIntro; delete s.skipOutro; delete s.autoFullscreen;
+            return Object.assign(def, s);
+        } catch (e) { return def; }
+    }
+    function saveSettings(s) { try { localStorage.setItem(SET_KEY, JSON.stringify(s)); } catch (e) { } }
+    let SET = loadSettings();
+
+    // ---------- 观看历史 ----------
+    function loadHistory() {
+        try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]') || []; }
+        catch (e) { return []; }
+    }
+    function saveHistory(arr) {
+        try { localStorage.setItem(HIST_KEY, JSON.stringify(arr.slice(0, 200))); } catch (e) { }
+    }
+    // 当前影片标识：优先用 url 中的影片id，否则用 pathname
+    function currentMovieKey() {
+        const m = location.href.match(/\/(?:movie|play|detail|tv|anime|variety|short)\/(\d+)/);
+        return m ? ('m:' + m[1]) : ('p:' + location.pathname);
+    }
+    function currentEpisodeNum() {
+        try {
+            const r = JSON.parse(localStorage.getItem('hhkan_select_record') || '{}');
+            if (r.episodeNum) return parseInt(r.episodeNum) || 0;
+        } catch (e) { }
+        const t = document.title || '';
+        const m = t.match(/第\s*(\d+)\s*集/) || location.href.match(/play\/\d+\/(\d+)/);
+        return m ? parseInt(m[1] || m[2]) || 0 : 0;
+    }
+    function recordProgress(video) {
+        if (!video || !video.duration || !isFinite(video.duration)) return;
+        const cur = currentMovieKey();
+        if (!cur) return;
+        const pct = Math.min(100, Math.round((video.currentTime / video.duration) * 100));
+        const ep = currentEpisodeNum();
+        const item = {
+            key: cur,
+            title: document.title.replace(/[-_|].*$/, '').trim().slice(0, 60) || location.href,
+            url: location.href,
+            ep: ep,
+            duration: Math.round(video.duration),
+            currentTime: Math.round(video.currentTime),
+            percent: pct,
+            updatedAt: Date.now()
+        };
+        const hist = loadHistory().filter(h => h.key !== cur);
+        hist.unshift(item);
+        saveHistory(hist);
+        // 同步到既有 select_record（供收藏/选集模块联动）
+        try {
+            const r = JSON.parse(localStorage.getItem('hhkan_select_record') || '{}');
+            r.url = location.href;
+            if (ep) r.episodeNum = ep;
+            localStorage.setItem('hhkan_select_record', JSON.stringify(r));
+        } catch (e) { }
+    }
+    // 删除单条历史
+    function deleteHistoryItem(key) {
+        const hist = loadHistory().filter(h => h.key !== key);
+        saveHistory(hist);
+    }
+    // 清空全部历史
+    function clearAllHistory() {
+        saveHistory([]);
+    }
+
+    // ---------- 片尾到点自动下一集（由 video 'ended' 事件触发，见 bindVideo）----------
+    function onTimeUpdate(video) { /* 预留：后续可按需扩展进度相关逻辑 */ }
+    // 暴露给外部（播放器设置模块的片尾跳过逻辑），优先使用"识别当前线路"的下一集实现
+    window.gotoNextEpisode = gotoNextEpisode;
+    function gotoNextEpisode() {
+        const ep = currentEpisodeNum();
+        // 优先复用主 JS 的 navigateEpisode(1)：它已正确识别"当前线路/当前集"，
+        // 并会按当前激活线路找下一集、跨线路时自动切换线路 tab，最符合用户预期。
+        if (typeof navigateEpisode === 'function') {
+            try {
+                navigateEpisode(1);
+                if (window.showFloatTip) window.showFloatTip('自动播放下一集');
+                return;
+            } catch (e) { console.warn('[enhance] navigateEpisode fail, fallback', e); }
+        }
+        // ---- 兜底：navigateEpisode 不可用时的自主实现 ----
+        // 关键：先读取选择记录中的 lineIndex，锁定"当前正在播放的线路"，
+        // 避免多线路同名集数时跳到错误线路的下一集。
+        const rec = (typeof getSelectRecord === 'function') ? getSelectRecord() : {};
+        let curLineIdx = (rec && typeof rec.lineIndex === 'number') ? rec.lineIndex : -1;
+        try {
+            if (typeof extractAllLines === 'function') {
+                const lines = extractAllLines();
+                if (lines.length === 0) { if (window.showFloatTip) window.showFloatTip('未检测到选集列表'); return; }
+                if (curLineIdx < 0 && typeof autoDetectAndNotify === 'function') {
+                    const det = autoDetectAndNotify();
+                    if (det && typeof det.lineIndex === 'number') curLineIdx = det.lineIndex;
+                }
+                let line = (curLineIdx >= 0 && lines[curLineIdx]) ? lines[curLineIdx] : null;
+                if (!line || !line.episodes || line.episodes.length === 0) {
+                    line = lines.find(l => l.episodes && l.episodes.length > 0) || lines[0];
+                }
+                const eps = (line.episodes || []).slice().sort((a, b) => (a.num || 0) - (b.num || 0));
+                const curNum = ep || 0;
+                const nxt = eps.find(e => (e.num || 0) > curNum);
+                if (nxt && nxt.url && nxt.url !== location.href) {
+                    const activeIdx = (typeof getActiveLineIndex === 'function') ? getActiveLineIndex() : -1;
+                    const lineIdx = lines.indexOf(line);
+                    if (activeIdx >= 0 && lineIdx >= 0 && lineIdx !== activeIdx && typeof switchLineTab === 'function') {
+                        switchLineTab(lineIdx);
+                    }
+                    if (window.showFloatTip) window.showFloatTip('自动播放下一集');
+                    setTimeout(() => { location.href = nxt.url; }, 500);
+                    return;
+                }
+            }
+        } catch (e) { console.warn('[enhance] nextEp parse fail', e); }
+        // 最终兜底：URL 中 play/id/ep 形式自增
+        const next = ep ? ep + 1 : 1;
+        const m = location.href.match(/(.*\/play\/\d+\/)(\d+)(\.html)?$/);
+        if (m) {
+            const url = m[1] + next + (m[3] || '');
+            if (window.showFloatTip) window.showFloatTip('自动播放下一集');
+            setTimeout(() => { location.href = url; }, 500);
+            return;
+        }
+        if (window.showFloatTip) window.showFloatTip('已是最后一集');
+    }
+
+    // ---------- 快捷键 ----------
+    // 兼容 68 配列（无独立小键盘，使用主键盘数字行）与 75 配列（带独立数字小键盘，Numpad 生效）
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+    // 查找可用视频元素：排除本地播放器遮罩内的视频，优先返回已就绪/可播放的视频
+    function getActiveVideo() {
+        const all = document.querySelectorAll('video');
+        let candidate = null;
+        for (const v of all) {
+            if (v.closest && v.closest('#local-player-mask')) continue;
+            if (!candidate) candidate = v;
+            // 优先选择有尺寸且未禁用、readyState 较高的视频
+            if (v.videoWidth > 0 && !v.disabled && v.readyState >= 2) return v;
+        }
+        return candidate;
+    }
+    function applyKey(e) {
+        if (!SET.keysEnabled) return;
+        const tag = (e.target && e.target.tagName) || '';
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+        // （已删除）空格键播放/暂停：Spacebar / Space 快捷键已移除，空格恢复为浏览器默认行为
+        const v = getActiveVideo();
+        if (!v) return;
+        let handled = true;
+        switch (e.key) {
+            case 'ArrowLeft': v.currentTime = clamp(v.currentTime - 10, 0, v.duration || 1e9); break;
+            case 'ArrowRight': v.currentTime = clamp(v.currentTime + 10, 0, v.duration || 1e9); break;
+            case 'j': case 'J': v.currentTime = clamp(v.currentTime - 10, 0, v.duration || 1e9); break;
+            case 'l': case 'L': v.currentTime = clamp(v.currentTime + 10, 0, v.duration || 1e9); break;
+            case 'm': case 'M': v.muted = !v.muted; break;
+            case 'n': case 'N': gotoNextEpisode(); break;
+            // （已删除）跳过进度快捷键：原数字键 0-9 / Numpad0-9 跳到 0%-90% 进度已移除
+            // （已删除）空格键播放/暂停：Spacebar / Space 已移除
+            default: handled = false;
+        }
+        if (handled) e.preventDefault();
+    }
+
+    // ---------- 绑定视频 ----------
+    function bindVideo(video) {
+        if (video._hhkanBound) return;
+        video._hhkanBound = true;
+        video._hhkanNextFired = false;
+        video.addEventListener('timeupdate', () => { onTimeUpdate(video); recordProgress(video); });
+        video.addEventListener('loadedmetadata', () => { video._hhkanNextFired = false; });
+        // 影片自然播放结束 + autoNext 开启 -> 自动续播下一集
+        video.addEventListener('ended', () => {
+            if (!SET.autoNext) return;
+            if (!video._hhkanNextFired) {
+                video._hhkanNextFired = true;
+                gotoNextEpisode();
+            }
+        });
+    }
+    function watchForVideo() {
+        const v = document.querySelector('video');
+        if (v) bindVideo(v);
+    }
+
+    // ---------- 设置弹窗（UI 名称：全局设置）----------
+    function openSettings() {
+        if (document.querySelector('#hhkan-enhance-settings')) return;
+        const mask = document.createElement('div');
+        mask.id = 'hhkan-enhance-settings';
+        mask.innerHTML = `
+        <div class="hes-box">
+            <div class="hes-head"><span>⚙ 全局设置</span><button class="hes-close" type="button" aria-label="关闭">×</button></div>
+            <div class="hes-body">
+                <label class="hes-row hes-check"><span>片尾到点自动播放下一集</span>
+                    <input type="checkbox" data-k="autoNext" ${SET.autoNext ? 'checked' : ''}>
+                </label>
+                <label class="hes-row hes-check"><span>启用全局快捷键</span>
+                    <input type="checkbox" data-k="keysEnabled" ${SET.keysEnabled ? 'checked' : ''}>
+                </label>
+                <div class="hes-keymap" id="hes-keymap">
+                    <div class="hes-keymap-title">⌨️ 快捷键说明（68 / 75 配列通用）</div>
+                    <table class="hes-keymap-table">
+                        <thead><tr><th>功能</th><th>快捷键</th><th>说明</th></tr></thead>
+                        <tbody>
+                            <tr><td>播放 / 暂停</td><td><b>Spacebar</b>（空格键）</td><td>切换视频的播放与暂停状态</td></tr>
+                            <tr><td>快退 10 秒</td><td><b>←</b> 或 <b>J</b></td><td>向左方向键 / J 键，进度回退 10 秒</td></tr>
+                            <tr><td>快进 10 秒</td><td><b>→</b> 或 <b>L</b></td><td>向右方向键 / L 键，进度前进 10 秒</td></tr>
+                            <tr><td>播放下一集</td><td><b>N</b></td><td>手动跳转到当前线路的下一集</td></tr>
+                            <tr><td>静音切换</td><td><b>M</b></td><td>开启 / 关闭视频声音</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="hes-keymap-sub"><b>配列提示：</b>68 键紧凑布局无独立小键盘，方向键 + J/L 更靠中；75 键保留标准右侧小键盘，数字输入与方向键互不冲突。（数字键跳进度功能已移除）</div>
+                    <div class="hes-keymap-sub"><b>注意：</b>在输入框 / 搜索框中按键不会触发快捷键；播放/暂停仅响应 <b>Spacebar</b>（已移除 P / K）。</div>
+                </div>
+            </div>
+            <div class="hes-foot">
+                <button type="button" class="hes-reset">恢复默认</button>
+                <button type="button" class="hes-save">保存</button>
+            </div>
+        </div>`;
+        document.body.appendChild(mask);
+        const close = () => mask.remove();
+        mask.querySelector('.hes-close').onclick = close;
+        mask.onclick = (e) => { if (e.target === mask) close(); };
+        mask.querySelector('.hes-save').onclick = () => {
+            mask.querySelectorAll('input[data-k]').forEach(inp => {
+                const k = inp.dataset.k;
+                if (inp.type === 'checkbox') SET[k] = inp.checked;
+                else if (inp.type === 'number') SET[k] = clamp(parseInt(inp.value, 10) || 0, 0, 600);
+            });
+            saveSettings(SET);
+            if (window.showFloatTip) window.showFloatTip('全局设置已保存');
+            close();
+        };
+        mask.querySelector('.hes-reset').onclick = () => {
+            localStorage.removeItem(SET_KEY); SET = loadSettings();
+            if (window.showFloatTip) window.showFloatTip('已恢复默认'); close();
+        };
+    }
+
+    // ---------- 继续观看弹窗（支持单条删除 + 清空全部）----------
+    function openContinueWatch() {
+        if (document.querySelector('#hhkan-continue-mask')) return;
+        const render = () => {
+            const hist = loadHistory();
+            const list = document.getElementById('hhkan-continue-list');
+            const empty = document.getElementById('hhkan-continue-empty');
+            if (!list) return;
+            if (!hist.length) {
+                list.innerHTML = '';
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+            list.innerHTML = hist.slice(0, 30).map(h => {
+                const pct = h.percent || 0;
+                const ep = h.ep ? `第${h.ep}集 · ` : '';
+                return `<div class="hc-item" data-key="${h.key}">
+                    <a class="hc-item-main" href="${h.url}" title="${h.title}">
+                        <div class="hc-title">${h.title}</div>
+                        <div class="hc-meta">${ep}看到 ${pct}%</div>
+                        <div class="hc-bar"><i style="width:${pct}%"></i></div>
+                    </a>
+                    <button type="button" class="hc-del" data-key="${h.key}" title="删除该影片记录">删除</button>
+                </div>`;
+            }).join('');
+            // 绑定单条删除按钮
+            list.querySelectorAll('.hc-del').forEach(btn => {
+                btn.onclick = (ev) => {
+                    ev.preventDefault(); ev.stopPropagation();
+                    const key = btn.dataset.key;
+                    deleteHistoryItem(key);
+                    render(); // 重新渲染
+                    if (window.showFloatTip) window.showFloatTip('已删除该影片记录');
+                };
+            });
+        };
+        const mask = document.createElement('div');
+        mask.id = 'hhkan-continue-mask';
+        mask.innerHTML = `<div class="hc-box">
+            <div class="hc-head"><span>⏯ 继续观看</span>
+                <button type="button" class="hc-clearall" title="清空全部观看记录">清空全部</button>
+                <button type="button" class="hc-close" aria-label="关闭">×</button>
+            </div>
+            <div class="hc-list" id="hhkan-continue-list"></div>
+            <div class="hc-empty" id="hhkan-continue-empty" style="display:none;">暂无观看记录</div>
+        </div>`;
+        document.body.appendChild(mask);
+        render();
+        // 清空全部
+        mask.querySelector('.hc-clearall').onclick = () => {
+            if (!loadHistory().length) { mask.remove(); return; }
+            if (confirm('确定要清空全部观看记录吗？此操作不可恢复。')) {
+                clearAllHistory();
+                render();
+                if (window.showFloatTip) window.showFloatTip('已清空全部观看记录');
+            }
+        };
+        mask.querySelector('.hc-close').onclick = () => mask.remove();
+        mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
+    }
+
+    // ---------- 注入任务栏按钮 ----------
+    function injectTopbarButtons() {
+        const bar = document.querySelector('#pake-window-top-bar');
+        if (!bar || bar.dataset.hhkanEnhanceInjected === '1') return;
+        const mk = (label, title, fn) => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.textContent = label; b.title = title;
+            b.style.pointerEvents = 'auto';
+            b.onclick = (e) => { e.stopPropagation(); fn(); };
+            return b;
+        };
+        bar.appendChild(mk('⏯ 继续观看', '打开观看历史/继续观看', openContinueWatch));
+        bar.appendChild(mk('⚙ 全局设置', '全局设置（快捷键/自动全屏/片尾续播）', openSettings));
+        bar.dataset.hhkanEnhanceInjected = '1';
+    }
+
+    // ---------- 样式 ----------
+    function injectStyles() {
+        if (document.querySelector('#hhkan-enhance-styles')) return;
+        const s = document.createElement('style');
+        s.id = 'hhkan-enhance-styles';
+        s.textContent = `
+        #hhkan-enhance-settings,#hhkan-continue-mask{position:fixed;inset:0;z-index:2147483640;
+            background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:flex-end;padding:${BAR_H + 12}px 16px 16px;box-sizing:border-box;}
+        #hhkan-continue-mask{justify-content:center;align-items:center;padding:${BAR_H + 12}px 12px 12px;}
+        .hes-box,.hc-box{background:#fff;color:#222;border-radius:12px;box-shadow:0 12px 48px rgba(0,0,0,.4);
+            animation:hesIn .25s cubic-bezier(.22,1,.36,1) forwards;max-height:80vh;display:flex;flex-direction:column;}
+        .hes-box{width:440px;padding:18px 20px;}
+        .hc-box{width:460px;padding:18px 20px;}
+        @keyframes hesIn{from{opacity:0;transform:translateY(-30px) scale(.97);}to{opacity:1;transform:none;}}
+        .hes-head,.hc-head{display:flex;align-items:center;justify-content:space-between;font-size:16px;font-weight:bold;margin-bottom:12px;gap:8px;}
+        .hes-close,.hc-close{background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#888;}
+        .hc-clearall{background:#fff0f0;color:#d33;border:1px solid #f5c6cb;border-radius:6px;font-size:12px;padding:4px 10px;cursor:pointer;}
+        .hc-clearall:hover{background:#ffe3e3;}
+        .hes-body{display:flex;flex-direction:column;gap:10px;overflow:auto;}
+        .hes-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;}
+        .hes-row input[type=number]{width:90px;padding:4px 6px;border:1px solid #ddd;border-radius:5px;}
+        .hes-check{justify-content:space-between;}
+        .hes-keymap{background:#f4f5fb;border:1px solid #e5e7f0;border-radius:8px;padding:10px 12px;font-size:12px;color:#444;line-height:1.65;}
+        .hes-keymap-title{font-weight:bold;color:#333;margin-bottom:6px;font-size:12.5px;}
+        .hes-keymap-sub{margin:6px 0 2px;}
+        .hes-keymap b{color:#5b4bff;}
+        .hes-keymap-table{width:100%;border-collapse:collapse;font-size:11.5px;margin:2px 0;}
+        .hes-keymap-table th,.hes-keymap-table td{padding:5px 6px;text-align:left;border-bottom:1px solid #e5e7f0;}
+        .hes-keymap-table th{background:#ecedf7;color:#333;font-weight:bold;font-size:11px;}
+        .hes-keymap-table td{color:#444;vertical-align:top;}
+        .hes-keymap-table tr:last-child td{border-bottom:none;}
+        .hes-keymap-table b{color:#5b4bff;white-space:nowrap;}
+        .hes-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+        .hes-foot button{padding:6px 16px;border:none;border-radius:6px;cursor:pointer;font-size:13px;}
+        .hes-save{background:#333;color:#fff;}.hes-reset{background:#eee;color:#333;}
+        .hc-list{overflow:auto;display:flex;flex-direction:column;gap:8px;}
+        .hc-item{display:flex;align-items:stretch;gap:8px;padding:0;border-radius:8px;background:#f6f6f8;}
+        .hc-item-main{flex:1;min-width:0;padding:10px 12px;text-decoration:none;color:inherit;display:block;}
+        .hc-item-main:hover{background:#ececf2;border-radius:8px;}
+        .hc-del{flex:0 0 auto;align-self:center;background:#fff0f0;border:1px solid #f5c6cb;color:#d33;
+            font-size:12px;line-height:1;cursor:pointer;padding:6px 12px;border-radius:6px;margin:0 10px;}
+        .hc-del:hover{background:#ffe3e3;}
+        .hc-title{font-size:14px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .hc-meta{font-size:12px;color:#888;margin:4px 0;}
+        .hc-bar{height:5px;background:#e2e2e8;border-radius:4px;overflow:hidden;}
+        .hc-bar i{display:block;height:100%;background:linear-gradient(90deg,#7f5cff,#5ad6ff);}
+        .hc-empty{padding:24px;text-align:center;color:#999;font-size:13px;}
+        `;
+        document.head.appendChild(s);
+    }
+
+    // ---------- 初始化 ----------
+    function init() {
+        injectStyles();
+        injectTopbarButtons();
+        watchForVideo();
+    }
+    document.addEventListener('keydown', applyKey);
+    // 视频动态出现时绑定 + 持续注入任务栏按钮
+    const mo = new MutationObserver(() => { watchForVideo(); injectTopbarButtons(); });
+    mo.observe(document.body, { childList: true, subtree: true });
+    setInterval(injectTopbarButtons, 3000);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else { init(); }
+})();
+});/* ============================================================
+
+/* ============================================================
+ * 好好看 · 补丁 v6
+ * 功能 ①：选集弹窗注入搜索框（输入集数 → 回车跳转并自动全屏）
+ * 功能 ②：修复 BUG —— 全屏播放时选集弹窗 UI 仍带搜索框
+ *            （监听全屏变化 + fsEl 子树，弹窗被移入全屏后补注入）
+ * 设计原则：纯全局 IIFE；仅通过 DOM + sessionStorage + 已暴露的
+ *           window.gotoNextEpisode 协作；不调用未暴露的内部函数。
+ * ============================================================ */
+(function () {
+    'use strict';
+    const PF_PREFIX = 'pf6-';
+    const STYLE_ID = PF_PREFIX + 'patch-styles';
+    const AUTO_FS_KEY = 'hhkan_auto_fullscreen'; // 与原脚本 AUTO_FS_KEY 同名约定
+
+    /* ---------- 日志 / 提示（降级兼容） ---------- */
+    function log(m) { console.log('[补丁v6] ' + m); }
+    function tip(text) {
+        if (typeof window.showFloatTip === 'function') { window.showFloatTip(text); return; }
+        let t = document.querySelector('#pf6-toast');
+        if (!t) { t = document.createElement('div'); t.id = 'pf6-toast';
+            t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;background:rgba(0,0,0,.82);color:#fff;padding:8px 16px;border-radius:8px;font-size:14px;pointer-events:none;';
+            document.body.appendChild(t); }
+        t.textContent = text; t.style.opacity = '1';
+        clearTimeout(t._h); t._h = setTimeout(() => { t.style.opacity = '0'; }, 1800);
+    }
+
+    /* ---------- 是否已注入搜索框 ---------- */
+    function hasSearchBox(mask) { return !!(mask && mask.querySelector('.' + PF_PREFIX + 'ep-search')); }
+
+    /* ---------- 解析用户输入为集数数字 ---------- */
+    function parseNum(q) {
+        if (!q) return null;
+        const m = String(q).trim().match(/^第?(\d+)集?$/);
+        return m ? parseInt(m[1], 10) : null;
+    }
+
+    /* ---------- 取当前可见的线路面板 ---------- */
+    function getActivePanel(mask) {
+        if (!mask) return null;
+        return mask.querySelector('.ep-line-panel:not([style*="display:none"])') || mask.querySelector('.ep-line-panel');
+    }
+
+    /* ---------- 注入搜索框 ---------- */
+    function injectEpSearch(mask) {
+        if (!mask || hasSearchBox(mask)) return;
+        const header = mask.querySelector('.ep-header');
+        if (!header) return; // 弹窗结构异常，放弃
+        const wrap = document.createElement('div');
+        wrap.className = PF_PREFIX + 'ep-search';
+        wrap.innerHTML =
+            '<input class="' + PF_PREFIX + 'ep-search-input" type="text" placeholder="🔍 输入集数(如 23) 回车跳转并全屏" inputmode="numeric" autocomplete="off">' +
+            '<span class="' + PF_PREFIX + 'ep-search-hit"></span>' +
+            '<button class="' + PF_PREFIX + 'ep-search-clear" type="button" title="清空">✕</button>';
+        header.insertAdjacentElement('afterend', wrap);
+        const input = wrap.querySelector('.' + PF_PREFIX + 'ep-search-input');
+        const hit = wrap.querySelector('.' + PF_PREFIX + 'ep-search-hit');
+        const clearBtn = wrap.querySelector('.' + PF_PREFIX + 'ep-search-clear');
+
+        const updateHit = function () {
+            const panel = getActivePanel(mask);
+            if (!panel) { hit.textContent = ''; return; }
+            const total = panel.querySelectorAll('.ep-item').length;
+            const num = parseNum(input.value);
+            if (num == null) { hit.textContent = '共 ' + total + ' 集'; return; }
+            const item = panel.querySelector('.ep-item[data-num="' + num + '"]');
+            hit.textContent = item ? '命中：第' + num + '集 ✓' : '未找到第' + num + '集';
+        };
+
+        const doJump = function (num) {
+            const panel = getActivePanel(mask);
+            if (!panel) return false;
+            const item = panel.querySelector('.ep-item[data-num="' + num + '"]');
+            if (!item) { tip('未找到第 ' + num + ' 集'); return false; }
+            tip('正在跳转到第 ' + num + ' 集…');
+            // 设置自动全屏标志：跳转后原脚本 tryAutoFullscreen 会接管进入全屏
+            try { sessionStorage.setItem(AUTO_FS_KEY, '1'); } catch (e) {}
+            // 触发原生点击（与原 .ep-item 点击行为一致）
+            try { item.click(); } catch (e) { location.href = item.getAttribute('href'); }
+            // 关闭选集弹窗
+            try { mask.remove(); } catch (e) {}
+            return true;
+        };
+
+        input.addEventListener('input', updateHit);
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const num = parseNum(input.value);
+                if (num == null) { tip('请输入集数，如 23'); return; }
+                doJump(num);
+            } else if (e.key === 'Escape') {
+                input.value = ''; updateHit();
+            }
+        });
+        clearBtn.addEventListener('click', function () { input.value = ''; updateHit(); input.focus(); });
+        setTimeout(updateHit, 0);
+        log('选集搜索框已注入（共 ' + (getActivePanel(mask).querySelectorAll('.ep-item').length) + ' 集）');
+    }
+
+    /* ---------- 监听弹窗出现：body 子节点 + 全屏元素子树 ---------- */
+    function watchEpisodeModal() {
+        var processed = new WeakSet();
+        var obs = new MutationObserver(function () {
+            var mask = document.querySelector('#episode-modal-mask');
+            if (mask && !processed.has(mask)) {
+                processed.add(mask);
+                injectEpSearch(mask);
+            }
+        });
+        // 监听 body 直接子节点变化（弹窗通常 append 到 body）
+        obs.observe(document.body, { childList: true, subtree: false });
+        // 若弹窗已存在（首次加载即出现），立即注入
+        var exist = document.querySelector('#episode-modal-mask');
+        if (exist) { processed.add(exist); injectEpSearch(exist); }
+        // 全屏时弹窗可能被移入 fsEl；监听全屏元素子树，补注入
+        var fsHandler = function () {
+            var fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+            if (!fsEl) return;
+            var mask = fsEl.querySelector('#episode-modal-mask');
+            if (mask) injectEpSearch(mask);
+        };
+        document.addEventListener('fullscreenchange', fsHandler);
+        document.addEventListener('webkitfullscreenchange', fsHandler);
+        document.addEventListener('mozfullscreenchange', fsHandler);
+        // 对全屏元素本身也做子树监听（弹窗 append 进 fsEl 时触发）
+        var fsObs = new MutationObserver(function () {
+            var fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+            if (!fsEl) return;
+            var mask = fsEl.querySelector('#episode-modal-mask');
+            if (mask) injectEpSearch(mask);
+        });
+        // 持续尝试把 fsObs 绑定到当前/未来的全屏元素
+        var bindFs = function () {
+            var fsEl = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement;
+            if (fsEl && fsEl !== window) {
+                try { fsObs.observe(fsEl, { childList: true, subtree: true }); } catch (e) {}
+            }
+        };
+        document.addEventListener('fullscreenchange', bindFs);
+        document.addEventListener('webkitfullscreenchange', bindFs);
+        document.addEventListener('mozfullscreenchange', bindFs);
+        bindFs();
+        log('选集弹窗监听已启动（含全屏补注入）');
+    }
+
+    /* ---------- 注入补丁样式 ---------- */
+    function injectStyles() {
+        if (document.querySelector('#' + STYLE_ID)) return;
+        var s = document.createElement('style');
+        s.id = STYLE_ID;
+        s.textContent =
+            '.' + PF_PREFIX + 'ep-search{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#fafafa;border-bottom:1px solid #eee;z-index:2147483646;position:relative;}' +
+            '.' + PF_PREFIX + 'ep-search-input{flex:1;height:30px;padding:0 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;color:#333;}' +
+            '.' + PF_PREFIX + 'ep-search-input:focus{border-color:#e65100;box-shadow:0 0 0 2px rgba(230,81,0,.15);}' +
+            '.' + PF_PREFIX + 'ep-search-hit{font-size:12px;color:#888;white-space:nowrap;}' +
+            '.' + PF_PREFIX + 'ep-search-clear{cursor:pointer;background:transparent;border:none;font-size:14px;color:#999;line-height:1;padding:4px 6px;}' +
+            '.' + PF_PREFIX + 'ep-search-clear:hover{color:#333;}' +
+            /* 全屏时确保弹窗及内部输入可交互 */ +
+            '#episode-modal-mask{position:fixed!important;inset:0!important;z-index:2147483646!important;}' +
+            '#episode-modal-mask input,' + '#episode-modal-mask button,' + '#episode-modal-mask a,' + '#episode-modal-mask .ep-item,' + '#episode-modal-mask .ep-line-tab{pointer-events:auto!important;}' +
+            '#episode-modal-mask .' + PF_PREFIX + 'ep-search{position:relative;z-index:2147483647;}';
+        document.head.appendChild(s);
+    }
+
+    /* ---------- 初始化 ---------- */
+    function init() {
+        injectStyles();
+        watchEpisodeModal();
+        // 若弹窗已存在（脚本加载滞后），立即注入
+        var exist = document.querySelector('#episode-modal-mask');
+        if (exist) injectEpSearch(exist);
+        log('✅ 补丁 v6 已加载（选集搜索回车跳转+自动全屏 / 全屏弹窗搜索可用修复）');
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+})();
+
