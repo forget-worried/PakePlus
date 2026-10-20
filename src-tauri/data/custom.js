@@ -59,18 +59,40 @@ function hhkanCoreText(){
     }catch(e){}
     return t;
 }
-// 读取好好看详情/播放页标签条（.detail-tags-item），按「/」拆分为标签数组
-//   ★ 详情页容器为 .detail-tags，播放页为 .detail-tags-2，故直接按条目类名取
+// 读取详情/播放页标签条，按「/」拆分为标签数组
+//   ★ 深度适配：覆盖 MacCMS/苹果CMS/Stui/各种自定义影视站模板
 function hhkanDetailTags(){
     var arr=[];
     try{
-        var nodes=document.querySelectorAll('.detail-tags-item, [class*="detail-tags"] a, [class*="detail-tags"] span');
+        var nodes=document.querySelectorAll(
+            // === hhkan 原生模板 ===
+            '.detail-tags-item, .detail-tags a, .detail-tags span, ' +
+            '[class*="detail-tags"] a, [class*="detail-tags"] span, ' +
+            // === Stui 模板（最常见的影视站模板） ===
+            '.stui-content__detail .data a, .stui-content__detail .data span, ' +
+            '.stui-pannel__head .tag, .stui-foot .tag, ' +
+            '.stui-content__detail a, .stui-content__detail span, ' +
+            // === MacCMS / 苹果CMS 模板 ===
+            '.video-info .data a, .video-info .data span, ' +
+            '.module-info .data a, .module-info .data span, ' +
+            '.vod-info .classify a, .vod-info .classify span, ' +
+            '.vod-info .data a, .vod-info .data span, ' +
+            // === 通用信息区 ===
+            '.detail-info .tags a, .detail-info .tags span, ' +
+            '.content-info .classify a, .content-info .classify span, ' +
+            '.play-info .classify a, .play-info .classify span, ' +
+            '.tags .tag, .tag-list a, .tag-list span, ' +
+            // === 模糊匹配（兜底） ===
+            '[class*="video-info"] a, [class*="vod-info"] a, ' +
+            '[class*="classify"] a, [class*="genre"] a, ' +
+            '[class*="detail-info"] a, [class*="content-info"] a'
+        );
         nodes.forEach(function(n){
             var t=(n.textContent||'').replace(/\s+/g,' ').trim();
-            if(t){
+            if(t && t.length<=20){
                 t.split('/').forEach(function(x){
                     x=x.trim();
-                    if(x) arr.push(x);
+                    if(x && x.length<=20) arr.push(x);
                 });
             }
         });
@@ -78,24 +100,58 @@ function hhkanDetailTags(){
     return arr;
 }
 // 选集结构：maxItems=单条线路最大项数；labels=全部项文案；hasQi/hasJi/hasHua
+//   ★ 深度适配：覆盖所有主流影视站模板的选集列表
+//   ★ v7.1 修复：精确统计真实「第N集/话/期」项的数量与去重编号，
+//     避免电影正片被站方标为"第1集"后误判为连续剧
+//     （关键：必须同时存在 ≥2 个不同编号的集数才算真剧集；单个"第1集"=电影正片）
 function hhkanEpisodeStructure(){
     var maxItems=0, labels=[], hasQi=false, hasJi=false, hasHua=false;
+    var jiNums=[], huaNums=[], qiNums=[];
     try{
-        document.querySelectorAll('.episode-list').forEach(function(l){
-            var items=l.querySelectorAll('.episode-item, a');
+        var listSelectors = [
+            // === hhkan 原生模板 ===
+            '.episode-list', '.episode-list-box', '.episode-box',
+            '.episode-items',
+            // === Stui 模板 ===
+            '.stui-content__playlist', '.stui-content__playlist-box',
+            '.stui-content__playlist ul',
+            // === MacCMS / 苹果CMS 模板 ===
+            '.module-play-list', '.module-play-list-box',
+            '.vod-play-list', '.vod-play-list-box',
+            '.play_from', '.play_source_list',
+            // === 通用播放列表 ===
+            '.playlist', '.play_list', '.play-list', '.play_list_box',
+            '.playurl-list', '.play-list-items', '.playlist-items',
+            '.play-list-item-box', '.playlist-item-box',
+            // === 更多变体 ===
+            '.anthology-list', '.num-list', '.playurl', '.play_box',
+            '.detail-play-list', '.play-line-list', '.line-list',
+            '.play-list ul', '.playlist ul'
+        ].join(',');
+        document.querySelectorAll(listSelectors).forEach(function(l){
+            var items=l.querySelectorAll('.episode-item, .playlist-item, .play_list_item, .play-item, li, a, button');
             maxItems=Math.max(maxItems,items.length);
             items.forEach(function(it){
                 var t=(it.textContent||'').replace(/\s+/g,' ').trim();
-                if(t){
+                if(t && t.length<=30){
                     labels.push(t);
-                    if(/期/.test(t)) hasQi=true;
-                    if(/集/.test(t)) hasJi=true;
-                    if(/话|番/.test(t)) hasHua=true;
+                    var mQi=t.match(/第?\s*(\d+)\s*期/); if(mQi){ hasQi=true; qiNums.push(parseInt(mQi[1])||0); }
+                    var mJi=t.match(/第?\s*(\d+)\s*集/); if(mJi){ hasJi=true; jiNums.push(parseInt(mJi[1])||0); }
+                    var mHua=t.match(/第?\s*(\d+)\s*话/); if(mHua){ hasHua=true; huaNums.push(parseInt(mHua[1])||0); }
                 }
             });
         });
     }catch(e){}
-    return {maxItems:maxItems, labels:labels, hasQi:hasQi, hasJi:hasJi, hasHua:hasHua};
+    var jiSet={}, jiUnique=0; jiNums.forEach(function(n){ if(n>0 && !jiSet[n]){jiSet[n]=1; jiUnique++;} });
+    var huaSet={}, huaUnique=0; huaNums.forEach(function(n){ if(n>0 && !huaSet[n]){huaSet[n]=1; huaUnique++;} });
+    var qiSet={}, qiUnique=0; qiNums.forEach(function(n){ if(n>0 && !qiSet[n]){qiSet[n]=1; qiUnique++;} });
+    return {
+        maxItems:maxItems, labels:labels,
+        hasQi:hasQi, hasJi:hasJi, hasHua:hasHua,
+        jiCount:jiNums.length, jiUnique:jiUnique, jiNums:jiNums,
+        huaCount:huaNums.length, huaUnique:huaUnique, huaNums:huaNums,
+        qiCount:qiNums.length, qiUnique:qiUnique, qiNums:qiNums
+    };
 }
 // ③ 影片形态判定（五类）：'movie' 电影 / 'series' 连续剧 / 'anime' 动漫 /
 //   'variety' 综艺 / 'short' 短剧 / '' 未知（交给 detectTotalEpisodes 兜底）
@@ -106,60 +162,263 @@ function hhkanEpisodeStructure(){
 function hhkanContentType(){
     try{
         var url=(location.href||'').toLowerCase();
-        // 1) 频道路由（最权威）
-        var cm=url.match(/\/channel\/(\d+)(?:\.html)?/);
-        if(cm){
-            var cmap={'1':'movie','2':'series','3':'anime','4':'variety','6':'short'};
-            if(cmap[cm[1]]) return cmap[cm[1]];
-        }
-        // 兼容其它模板/旧路由
-        if(/\/variety|zongyi|\/zy\//.test(url)) return 'variety';
-        if(/\/anime|dongman|\/dm\//.test(url)) return 'anime';
-        if(/\/short|duanju|\/dj\//.test(url)) return 'short';
-        if(/\/film\/|\/movie\/\d+\.html/.test(url)) return 'movie';
+        var pageTitle=(document.title||'').toLowerCase();
 
+        // ========== 第1级：频道路由（最权威，但允许内容复核覆盖） ==========
+        var cm=url.match(/\/channel\/(\d+)(?:\.html)?/);
+        var channelGuess='';
+        if(cm){
+            var cmap={'1':'movie','2':'series','3':'anime','4':'variety','5':'variety','6':'short','7':'short'};
+            channelGuess=cmap[cm[1]]||'';
+        }
+        // URL 直含类型路径
+        if(/\/variety|zongyi|\/zy\/|\/show\//.test(url)) { if(!channelGuess) return 'variety'; }
+        if(/\/anime|dongman|\/dm\/|\/cartoon\//.test(url)) { if(!channelGuess) return 'anime'; }
+        if(/\/short|duanju|\/dj\/|\/mini\//.test(url)) { if(!channelGuess) return 'short'; }
+        if(/\/film\/|\/movie\/\d+\.html|\/dy\//.test(url)) return 'movie';
+
+        // ★ v15.1 修复：从短剧频道点进详情页时，referrer 会带 /channel/6 或 /channel/7
+        //   详情页 URL 格式是 /detail/数字.html，跟普通连续剧完全一样，不带任何类型特征，
+        //   必须靠 referrer 判断来源频道，否则短剧会被误判为连续剧
+        if(!channelGuess){
+            try{
+                var ref=(document.referrer||'').toLowerCase();
+                if(/\/channel\/6|\/channel\/7/.test(ref)) channelGuess='short';
+            }catch(e){}
+        }
+
+        // ========== 第2级：选集结构判断（最核心，最可靠） ==========
+        var es=hhkanEpisodeStructure();
         var tags=hhkanDetailTags();
         var tagText=tags.join(' ');
-        // 2) 标签条（详情/播放页都有，优先级最高）
-        if(/综艺|真人秀|脱口秀|选秀|访谈|演唱会|音乐盛典/.test(tagText)) return 'variety';
-        if(/短剧|微短剧|迷你剧/.test(tagText)) return 'short';
-        if(/动画|动漫|卡通|番剧|二次元/.test(tagText)) return 'anime';
-        if(/纪录片?/.test(tagText)) return 'movie';
-        // 电影题材标签（以「片」结尾：动作片/剧情片/喜剧片/恐怖片/科幻片…）
-        for(var i=0;i<tags.length;i++){
-            if(/片$/.test(tags[i])) return 'movie';
-        }
-        // 连续剧标记（国产剧/欧美剧/韩剧/日剧/古装剧/连续剧/电视剧…，以「剧」结尾）
-        for(var j=0;j<tags.length;j++){
-            var tg=tags[j];
-            if(/剧$/.test(tg) && !/短剧/.test(tg)) return 'series';
-            if(/连续剧|电视剧|国产剧|欧美剧|韩剧|日剧|泰剧|港剧|台剧|网剧|剧集/.test(tg)) return 'series';
-        }
+        var allText=tagText+pageTitle;
 
-        // 3) 选集结构
-        var es=hhkanEpisodeStructure();
-        if(es.hasQi) return 'variety';
-        if(es.maxItems>=2 && (es.hasJi||es.hasHua)) return 'series';
-        if(es.maxItems<=1 && es.labels.length){
-            // 每条线路仅 1 项、且无「第N集/期」→ 画质/正片项，判定电影
-            var nonEp=es.labels.filter(function(x){return !/第\s*\d+\s*[集期话]/.test(x);});
-            if(nonEp.length===es.labels.length) return 'movie';
-        }
+        // ★ v7.1 修复：先检查「明确的电影标签」——以"片"结尾的类型词是电影的强证据
+        //   （动作片/喜剧片/爱情片/战争片/科幻片/功夫片/运动片/纪录片...）
+        //   只要标签里有这类词，且没有 ≥2 个不同编号的集数，就优先判电影，
+        //   避免"功夫女足"这类电影因站方把正标为"第1集"+页面其他板块带"剧集"二字而误判
+        var hasMovieTag=/电影|动作片|喜剧片|爱情片|战争片|科幻片|恐怖片|惊悚片|剧情片|冒险片|纪录片|武侠片|古装片|功夫片|运动片|儿童片|悬疑片|犯罪片|灾难片|奇幻片|魔幻片|历史片|传记片|音乐片|歌舞片|伦理片|故事片|译制片|动画片|武打片|枪战片|片\s*$/.test(allText);
+        // ★ 真剧集的硬证据：必须有 ≥2 个不同编号的集数（同时存在第1集和第2集）
+        //   单个"第1集"是电影站对正片的常见标记，不算连续剧
+        var realJi=es.jiUnique>=2;
+        var realHua=es.huaUnique>=2;
+        var realQi=es.qiUnique>=2;
 
-        // 4) 页面核心文本兜底
-        var txt=hhkanCoreText();
-        var genre=(typeof getMovieGenreSync==='function')?(getMovieGenreSync()||''):'';
-        if(/第\s*\d+\s*期|共\s*\d+\s*期|更新至\s*\d+\s*期|综艺|真人秀|脱口秀/.test(txt+' '+tagText)) return 'variety';
-        if(/动漫|动画|番剧/.test(txt+' '+genre)) return 'anime';
-        if(/短剧|微短剧/.test(txt)) return 'short';
-        // 裸题材标签（剧情 / 运动…）、每线仅1项、且无「片」标记 → 连续剧（本站电影必带「片」标签）
-        if(tagText && es.maxItems<=1 && !/片/.test(tagText)) return 'series';
+        // ★ v7.1：频道与内容矛盾时的复核——
+        //   频道说是 series，但内容明确是电影（有"片"标签 + 没有第2集），以内容为准
+        if(channelGuess==='series' && hasMovieTag && !realJi && !realHua) return 'movie';
+        // 频道说是 movie，但内容确实有多集（≥2个不同编号）且标签是剧集，以内容为准
+        if(channelGuess==='movie' && (realJi||realHua) && /连续剧|电视剧|国产剧|韩剧|日剧|美剧|英剧|港剧|台剧|泰剧|网剧/.test(allText)) return 'series';
+
+        // 有 ≥2 个不同期号 → 综艺
+        if(realQi) return 'variety';
+        // 单个"期"字（如"本周第1期"）不足以判定综艺，继续往下
+        // 有 ≥2 个不同编号的集/话 → 真剧集（电影不可能有第2集）
+        if(es.maxItems>=2 && (realJi||realHua)) {
+            // ★ v15 修复：先检查短剧关键词——短剧也有多集（通常几十集），
+            //   避免被选集结构判断误判为连续剧，走不到后面的标签/标题短剧识别分支。
+            //   （继续观看 / 我的收藏里短剧显示成"连续剧"的根因）
+            if(/短剧|微短剧|迷你剧|竖屏剧/.test(allText)) return 'short';
+            // 先看标签/标题有没有动漫关键词
+            if(/动画|动漫|番剧|卡通|国漫|日漫/.test(allText)) return 'anime';
+            // 再看标签/标题有没有连续剧关键词
+            if(/连续剧|电视剧|国产剧|韩剧|日剧|美剧|英剧|港剧|台剧|泰剧|网剧|欧美剧/.test(allText)) return 'series';
+            // ★ v14：已经数到多集（第1集+第2集）就是剧集，不可能是电影。
+            //   不再因为标签有"片"字或没匹配到剧关键词就判 movie——
+            //   禁忌女孩等泰剧/黑色五叶草等动漫就是在这里被误判成电影的。
+            return 'series';
+        }
+        // ★ v7.1：只有单个"第1集"（jiUnique<2）时，即使标签里有剧关键词，也优先电影
+        //   （这是"功夫女足"类电影被误判的根因：正片标为第1集 + 页面某板块带"剧集"二字）
+        if(hasMovieTag) return 'movie';
+        // ★ 如果频道路由给出了判断且没被复核推翻，直接采用
+        if(channelGuess) return channelGuess;
+        // 单条线路 → 电影
+        if(es.maxItems===1) return 'movie';
+
+        // ========== 第3级：页面标题判断（保守，只判明确的类型词） ==========
+        if(/短剧|微短剧|竖屏剧/.test(pageTitle)) return 'short';
+        if(/综艺|真人秀|脱口秀|选秀|晚会/.test(pageTitle)) return 'variety';
+        if(/动漫|动画|番剧|卡通/.test(pageTitle)) return 'anime';
+        if(/电影|影片|大电影/.test(pageTitle)) return 'movie';
+
+        // ========== 第4级：标签条判断（辅助，只判明确的类型） ==========
+        if(/综艺|真人秀|脱口秀|选秀|演唱会|晚会|纪录片/.test(tagText)) return 'variety';
+        if(/短剧|微短剧|迷你剧|竖屏剧/.test(tagText)) return 'short';
+        if(/动画|动漫|卡通|番剧|国漫|日漫/.test(tagText)) return 'anime';
+
+        // ========== 第5级：最终兜底：默认电影 ==========
+        // 大部分影视站详情页都是电影，解析失败时默认电影
+        return 'movie';
     }catch(e){}
-    return '';
+    return 'movie';
 }
 // ==================== v9 通用工具结束 ====================
 waitDomReady(()=>{
-    // ====================================================================
+    // ★ v15.4：搜索框蓝色氛围灯效果
+    (function injectSearchGlow(){
+        var css = document.createElement('style');
+        css.textContent = [
+            '/* ★ 搜索框蓝色氛围灯 */',
+            'body > div.t-p > div.t-p-main > div.header > div.form-box.fs-margin-section-left > form > div {',
+            '    border-radius: 10px !important;',
+            '    box-shadow: 0 0 16px rgba(74, 144, 226, 0.45),',
+            '                0 0 40px rgba(74, 144, 226, 0.2),',
+            '                inset 0 0 12px rgba(74, 144, 226, 0.08) !important;',
+            '    transition: box-shadow 0.3s ease !important;',
+            '    position: relative !important;',
+            '}',
+            'body > div.t-p > div.t-p-main > div.header > div.form-box.fs-margin-section-left > form > div:hover {',
+            '    box-shadow: 0 0 24px rgba(74, 144, 226, 0.7),',
+            '                0 0 60px rgba(74, 144, 226, 0.35),',
+            '                inset 0 0 16px rgba(74, 144, 226, 0.12) !important;',
+            '}',
+            '/* ★ 搜索联想下拉列表 */',
+            '.hhk-suggest {',
+            '    position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 9999;',
+            '    background: rgba(25, 28, 38, 0.97); backdrop-filter: blur(12px);',
+            '    border-radius: 10px; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.4);',
+            '    border: 1px solid rgba(74,144,226,.2); display: none;',
+            '}',
+            '.hhk-suggest.show { display: block; animation: hhkSugIn .18s ease; }',
+            '@keyframes hhkSugIn { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }',
+            '.hhk-suggest-item {',
+            '    padding: 10px 14px; cursor: pointer; font-size: 13px; color: #e0e4ec;',
+            '    display: flex; align-items: center; gap: 8px; transition: background .15s;',
+            '}',
+            '.hhk-suggest-item:hover, .hhk-suggest-item.active { background: rgba(74,144,226,.15); color: #fff; }',
+            '.hhk-suggest-item .sug-icon { font-size: 14px; opacity: .6; flex: 0 0 auto; }',
+            '.hhk-suggest-item .sug-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+            '.hhk-suggest-item .sug-type { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(74,144,226,.25); color: #7ab8ff; flex: 0 0 auto; }',
+            '.hhk-suggest-empty { padding: 14px; text-align: center; font-size: 12px; color: #888; }',
+        ].join('\n');
+        var _head = document.head || document.getElementsByTagName('head')[0] || document.documentElement;
+        _head.appendChild(css);
+    })();
+
+    // ★ v15.7：搜索输入联想提示功能（直接从表单读取真实搜索地址）
+    (function injectSearchSuggest(){
+        var formSel = 'body > div.t-p > div.t-p-main > div.header > div.form-box.fs-margin-section-left > form';
+        var boxSel  = formSel + ' > div';
+        var timer = null;
+        var sugEl = null;
+        var activeIdx = -1;
+        var searchConfig = null; // { baseUrl, paramName } 从表单自动探测
+
+        function findForm(){ return document.querySelector(formSel); }
+        function findInput(){ var f = findForm(); return f ? f.querySelector('input[type="text"], input[type="search"], input:not([type])') : null; }
+        function findBox(){ return document.querySelector(boxSel); }
+
+        // ★ 从表单自动探测搜索接口配置
+        function detectSearchConfig(){
+            var form = findForm();
+            if (!form) return null;
+            var action = form.getAttribute('action') || form.action || '/search.html';
+            var input = findInput();
+            var paramName = input ? (input.name || 'searchword') : 'searchword';
+            // 处理 action 里已经带了 ? 的情况
+            var sep = action.indexOf('?') >= 0 ? '&' : '?';
+            return { baseUrl: action, sep: sep, paramName: paramName };
+        }
+
+        function ensureSug(box){
+            if (!sugEl) {
+                sugEl = document.createElement('div');
+                sugEl.className = 'hhk-suggest';
+                box.appendChild(sugEl);
+            }
+            return sugEl;
+        }
+
+        function hideSug(){ if (sugEl) sugEl.classList.remove('show'); }
+
+        function renderSug(items){
+            if (!items || !items.length) {
+                sugEl.innerHTML = '<div class="hhk-suggest-empty">未找到相关影片</div>';
+            } else {
+                sugEl.innerHTML = items.slice(0, 8).map(function(it, i){
+                    return '<div class="hhk-suggest-item" data-idx="' + i + '">'
+                        + '<span class="sug-icon">🎬</span>'
+                        + '<span class="sug-title">' + it.title + '</span>'
+                        + '</div>';
+                }).join('');
+                sugEl.querySelectorAll('.hhk-suggest-item').forEach(function(el){
+                    el.onclick = function(){
+                        var inp = findInput();
+                        if (inp) { inp.value = el.querySelector('.sug-title').textContent; }
+                        var form = findForm();
+                        if (form) form.submit();
+                    };
+                });
+            }
+            sugEl.classList.add('show');
+        }
+
+        function doSearch(kw){
+            if (!kw || !kw.trim()) { hideSug(); return; }
+            kw = kw.trim();
+            if (!searchConfig) searchConfig = detectSearchConfig();
+            if (!searchConfig) { hideSug(); return; }
+            var url = searchConfig.baseUrl + searchConfig.sep + searchConfig.paramName + '=' + encodeURIComponent(kw);
+            fetch(url)
+                .then(function(r){ return r.text(); })
+                .then(function(html){
+                    var doc = new DOMParser().parseFromString(html, 'text/html');
+                    var items = [];
+                    // 尝试多种选择器提取影片标题
+                    var sels = ['.stui-vodlist__box', '.module-items .item', '.search-result-item', '.vodlist_item', '.list-item', '.searchlist_item'];
+                    for (var s = 0; s < sels.length; s++) {
+                        var boxes = doc.querySelectorAll(sels[s]);
+                        if (boxes.length) {
+                            boxes.forEach(function(box, j){
+                                if (j >= 8) return;
+                                var a = box.querySelector('a[title], a[href*="detail"]');
+                                var t = (a ? a.getAttribute('title') || a.textContent : '').trim();
+                                if (t) items.push({ title: t });
+                            });
+                            break;
+                        }
+                    }
+                    // 兜底：找所有 detail 链接
+                    if (!items.length) {
+                        doc.querySelectorAll('a[href*="detail"]').forEach(function(a, j){
+                            if (j >= 8) return;
+                            var t = (a.getAttribute('title') || a.textContent || '').trim();
+                            if (t && t.length > 1) items.push({ title: t });
+                        });
+                    }
+                    renderSug(items);
+                })
+                .catch(function(){ hideSug(); });
+        }
+
+        function bind(){
+            var input = findInput();
+            var box = findBox();
+            if (!input || !box) return;
+            ensureSug(box);
+            input.addEventListener('input', function(){
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(function(){ doSearch(input.value); }, 350);
+            });
+            input.addEventListener('focus', function(){ if (input.value) sugEl.classList.add('show'); });
+            input.addEventListener('keydown', function(e){
+                if (!sugEl || !sugEl.classList.contains('show')) return;
+                var items = sugEl.querySelectorAll('.hhk-suggest-item');
+                if (!items.length) return;
+                if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = (activeIdx+1)%items.length; }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = (activeIdx-1+items.length)%items.length; }
+                else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); items[activeIdx].click(); }
+                else if (e.key === 'Escape') hideSug();
+                items.forEach(function(it, i){ it.classList.toggle('active', i === activeIdx); });
+            });
+            document.addEventListener('click', function(e){ if (!e.target.closest(boxSel)) hideSug(); });
+        }
+
+        setTimeout(bind, 800);
+        var mo = new MutationObserver(function(){ if (!sugEl) bind(); });
+        mo.observe(document.body, { childList: true, subtree: true });
+    })();
     // ★★★ 启动流程（开屏动画 + 站点探测 合并 · 可配置）★★★
     // --------------------------------------------------------------------
     // 设计目标：
@@ -181,7 +440,7 @@ waitDomReady(()=>{
         //                'every' 每次进入都弹、'never' 完全禁用弹窗
         splashMode: 'once',
         // 动画总时长（ms），探测若先完成会提前收尾（取二者较大值）
-        splashDuration: 5200,
+        splashDuration: 10000,
         // 是否把探测过程实时回写到弹窗（URL 显现、进度、提示语）
         showProbeInSplash: true,
         // 是否在后台持续复查镜像（online/focus/定时），false 则只启动时探一次
@@ -281,24 +540,14 @@ waitDomReady(()=>{
     //   触发浏览器并发上限与 WAF 限流（"一直检测 / 被拉黑"的直接原因）。
     //   返回可用镜像列表（响应最快在前）。
     async function _probeAllHosts(){
+        // ★ v14：只返回当前域名，不再跨域探测其他镜像（避免 CORS 报错）
         const fromLoc = _hostFromLocation();
-        // 若当前页就在某个镜像上，把它排最前优先测（同域通常最快最稳）
-        const queue = fromLoc
-            ? [fromLoc, ...HHKAN_CANDIDATES.filter(h => _normHost(h) !== fromLoc)]
-            : [...HHKAN_CANDIDATES];
-        const limit = Math.max(1, parseInt(HHKAN_BOOT.probeConcurrency) || 3);
-        const results = [];
-        // 按批次推进，每批最多 limit 个并发
-        for (let i = 0; i < queue.length; i += limit) {
-            const batch = queue.slice(i, i + limit);
-            const batchRes = await Promise.all(
-                batch.map(host => _probeOne(host).then(h => ({ host, ok: !!h })))
-            );
-            results.push(...batchRes);
-        }
-        const alive = results.filter(r => r.ok).map(r => _normHost(r.host));
-        // 全挂则退回原顺序（保底仍可访问）
-        return alive.length ? alive : queue.map(_normHost);
+        if (fromLoc) return [fromLoc];
+        try {
+            var o = (location.origin || '').replace(/\/+$/, '');
+            if (o) return [o];
+        } catch(e){}
+        return [_normHost(HHKAN_CANDIDATES[0])];
     }
 
     // 执行探测并落地到 _hhkanActiveHost + localStorage
@@ -360,13 +609,16 @@ waitDomReady(()=>{
         return _hhkanActiveHost;
     }
 
-    // 对外：获取当前最优主站（带协议、无末尾斜杠）。探测未完成时同步返回兜底值
+    // 对外：获取当前主站（带协议、无末尾斜杠）。
+    // ★ v14：只返回当前网址 origin，不再跨域探测其他镜像（避免 CORS 报错）
     function hhkanHost(){
+        try {
+            var o = (location.origin || '').replace(/\/+$/, '');
+            if (o) return o;
+        } catch(e){}
         if(_hhkanActiveHost) return _hhkanActiveHost;
         const fromLoc = _hostFromLocation();
         if(fromLoc) return fromLoc;
-        const cached = localStorage.getItem(HHKAN_PROBE_KEY) || '';
-        if(cached) return _normHost(cached);
         return _normHost(HHKAN_CANDIDATES[0]);
     }
     // 对外：基于当前最优主站拼接路径（path 以 "/" 开头即可）
@@ -397,6 +649,12 @@ waitDomReady(()=>{
         if(!_shouldPlay()){ return null; }   // 不弹窗时也返回 null，外部回调自动跳过
 
         const SITE = hhkanHost();             // ★ 跟随当前最优镜像（探测/缓存/兜底）
+        // ★ v8优化：提前预加载logo图片，避免图片到达时布局跳动/闪烁卡顿
+        const LOGO_SRC = 'https://aka.doubaocdn.com/s/q7f8D56xTd';
+        if(!document.querySelector(`img[src="${LOGO_SRC}"]`)){
+            const _preLogo = new Image();
+            _preLogo.src = LOGO_SRC;
+        }
         // ---- 构建 DOM ----
         const mask = document.createElement('div');
         mask.id = 'hhkan-splash-mask';
@@ -409,23 +667,21 @@ waitDomReady(()=>{
         mask.innerHTML = `
         <div class="splash-bg">
             <div class="splash-glow"></div>
-            <div class="splash-stars" id="splash-stars"></div>
-            <div class="splash-meteors" id="splash-meteors"></div>
-            <div class="splash-balloons" id="splash-balloons"></div>
+            <div class="splash-particles" id="splash-particles"></div>
         </div>
         <div class="splash-content">
             <div class="splash-logo">
-                <span class="splash-logo-icon">🎬</span>
+                <img class="splash-logo-icon" src="https://aka.doubaocdn.com/s/q7f8D56xTd" alt="好好看—二创" fetchpriority="high" decoding="async">
                 <span class="splash-logo-text" id="splash-logo-text"></span>
             </div>
             <div class="splash-sub" id="splash-sub"></div>
-            <div class="splash-url" id="splash-url"></div>
             <div class="splash-progress">
                 <div class="splash-progress-bar" id="splash-progress-bar"></div>
             </div>
             <div class="splash-tip" id="splash-tip">正在为您准备精彩内容…</div>
         </div>
         `;
+        if(!document.body) return null;  // body 未就绪时跳过开屏动画
         document.body.appendChild(mask);
         // ★ 兜底：记录可能干扰"position:fixed 参照 / 层叠上下文"的样式，动画期间临时清零
         const savedStyles = {
@@ -454,15 +710,75 @@ waitDomReady(()=>{
 
         const logoText   = mask.querySelector('#splash-logo-text');
         const splashSub  = mask.querySelector('#splash-sub');
-        const splashUrl  = mask.querySelector('#splash-url');
         const progressBar= mask.querySelector('#splash-progress-bar');
         const splashTip  = mask.querySelector('#splash-tip');
-        const balloonsHost  = mask.querySelector('#splash-balloons');
-        const particlesHost = mask.querySelector('#splash-stars');
-        const meteorsHost   = mask.querySelector('#splash-meteors');
+        const particlesBox = mask.querySelector('#splash-particles');
+        const glowEl     = mask.querySelector('.splash-glow');
+
+        // ---- 周围装饰：浮动星光粒子（随机位置/大小/速度/透明度） ----
+        // ★ v8优化：粒子数量 36→22 降低渲染压力；支持点击交互（点击消失后随机位置重新出现）
+        const PARTICLE_COUNT = 22;
+        const particleEls = [];
+        for(let i = 0; i < PARTICLE_COUNT; i++){
+            const p = document.createElement('span');
+            p.className = 'splash-particle';
+            const size = 3 + Math.random() * 4;
+            p.style.width = size + 'px';
+            p.style.height = size + 'px';
+            p.style.left = Math.random() * 100 + '%';
+            p.style.top = Math.random() * 100 + '%';
+            p.style.animationDelay = (Math.random() * 4) + 's';
+            p.style.animationDuration = (3 + Math.random() * 4) + 's';
+            p.style.opacity = (0.3 + Math.random() * 0.5).toFixed(2);
+            // ★ 星星点击交互：点击后缩小淡出消失，1.2~3秒后在随机位置重新出现
+            p.addEventListener('click', function(e){
+                e.stopPropagation();
+                if(p._gone) return;
+                p._gone = true;
+                p.style.transition = 'opacity .3s ease, transform .3s ease';
+                p.style.opacity = '0';
+                p.style.transform = 'scale(0)';
+                setTimeout(()=>{
+                    // 重新出现：随机换位置和大小
+                    p.style.left = Math.random() * 100 + '%';
+                    p.style.top = Math.random() * 100 + '%';
+                    const ns = 3 + Math.random() * 4;
+                    p.style.width = ns + 'px';
+                    p.style.height = ns + 'px';
+                    p.style.transform = '';
+                    p.style.opacity = (0.3 + Math.random() * 0.5).toFixed(2);
+                    p._gone = false;
+                }, 1200 + Math.random() * 1800);
+            });
+            particlesBox.appendChild(p);
+            particleEls.push(p);
+        }
+
+        // ---- 鼠标互动：glow光晕跟随鼠标轻微移动（视差效果） ----
+        // ★ v8优化：改用 requestAnimationFrame + transform（替代 setInterval + margin），消除频繁重排卡顿
+        let _mouseX = 0, _mouseY = 0, _glowX = 0, _glowY = 0;
+        let _glowRafId = null;
+        function _onSplashMouseMove(e){
+            _mouseX = e.clientX;
+            _mouseY = e.clientY;
+            if(_glowRafId === null) _glowRafId = requestAnimationFrame(_glowTick);
+        }
+        mask.addEventListener('mousemove', _onSplashMouseMove);
+        function _glowTick(){
+            _glowRafId = null;
+            const w = window.innerWidth, h = window.innerHeight;
+            const targetX = (_mouseX / w - 0.5) * 40;
+            const targetY = (_mouseY / h - 0.5) * 40;
+            _glowX += (targetX - _glowX) * 0.1;
+            _glowY += (targetY - _glowY) * 0.1;
+            if(glowEl) glowEl.style.transform = `translate(calc(-50% + ${_glowX}px), calc(-50% + ${_glowY}px))`;
+            if(Math.abs(targetX - _glowX) > 0.5 || Math.abs(targetY - _glowY) > 0.5){
+                _glowRafId = requestAnimationFrame(_glowTick);
+            }
+        }
 
         // ---- 打字机效果：打出站点名 ----
-        const siteLabel = '好好看';
+        const siteLabel = '好好看—二创';
         let ti = 0;
         const typeTimer = setInterval(()=>{
             ti++;
@@ -470,94 +786,30 @@ waitDomReady(()=>{
             if(ti >= siteLabel.length){ clearInterval(typeTimer); }
         }, 180);
         // 副标题逐字
-        const subText = '欢迎来到您的专属好好看';
+        const subText = '欢迎来到您的专属二创影视空间';
         let si = 0;
         const subTimer = setInterval(()=>{
             si++;
             splashSub.textContent = subText.slice(0, si);
             if(si >= subText.length){ clearInterval(subTimer); }
         }, 90);
-        // URL 字符逐个显现（探测完成后会整体刷新为真实最优镜像）
-        let ui = 0;
-        const urlTimer = setInterval(()=>{
-            ui++;
-            splashUrl.textContent = SITE.slice(0, ui);
-            if(ui >= SITE.length){ clearInterval(urlTimer); }
-        }, 35);
-
-        // ---- 气球生成 ----
-        const balloonColors = ['#e74c3c','#3498db','#2ecc71','#f1c40f','#9b59b6','#e67e22','#1abc9c','#ff7675','#74b9ff','#ffeaa7'];
-        const balloonCount = 18;
-        for(let i=0;i<balloonCount;i++){
-            const b = document.createElement('div');
-            b.className = 'splash-balloon';
-            const size = 34 + Math.random()*30;
-            const color = balloonColors[Math.floor(Math.random()*balloonColors.length)];
-            const left = Math.random()*92;
-            const delay = Math.random()*2.2;
-            const dur = 4 + Math.random()*4;
-            const sway = 20 + Math.random()*40;
-            const swayDur = 2 + Math.random()*3;
-            b.style.cssText = `
-                left:${left}vw;
-                width:${size}px;height:${size*1.18}px;
-                background:radial-gradient(circle at 32% 30%, rgba(255,255,255,0.55), ${color} 60%, ${color} 100%);
-                box-shadow:inset -4px -6px 10px rgba(0,0,0,0.18), 0 6px 14px rgba(0,0,0,0.25);
-                animation: balloonRise ${dur}s ${delay}s ease-out forwards, balloonSway ${swayDur}s ${delay}s ease-in-out infinite alternate;
-                --sway:${sway}px;
-            `;
-            const string = document.createElement('span');
-            string.className='splash-balloon-string';
-            b.appendChild(string);
-            balloonsHost.appendChild(b);
-        }
-        // ---- 背景星星 ----
-        const starCount = 60;
-        for(let i=0;i<starCount;i++){
-            const st = document.createElement('span');
-            st.className='splash-star';
-            const sz = (Math.random()<0.75 ? 1+Math.random()*2 : 3+Math.random()*3);
-            const op = (0.45+Math.random()*0.55).toFixed(2);
-            st.style.cssText = `
-                left:${Math.random()*100}vw;
-                top:${Math.random()*100}vh;
-                width:${sz}px;height:${sz}px;
-                opacity:${op};
-                animation: starTwinkle ${2+Math.random()*4}s ${Math.random()*3}s ease-in-out infinite alternate;
-            `;
-            particlesHost.appendChild(st);
-        }
-        // ---- 流星 ----
-        const meteorCount = 5;
-        for(let i=0;i<meteorCount;i++){
-            const m = document.createElement('span');
-            m.className='splash-meteor';
-            const top = Math.random()*45;
-            const delay = Math.random()*4;
-            const dur = 2.2+Math.random()*1.8;
-            const len = 90+Math.random()*90;
-            m.style.cssText = `
-                top:${top}vh;
-                --len:${len}px;
-                animation: meteorFall ${dur}s ${delay}s ease-in infinite;
-            `;
-            meteorsHost.appendChild(m);
-        }
 
         // ---- 进度条（动画进度 + 探测进度双源驱动，取较大值） ----
         let animProgress = 0;
-        let probeProgress = 0;   // 探测回调写入：拿到最优镜像即 100
+        let probeProgress = 0;   // 探测回调写入：拿到最优镜像即 100（仅保留变量，不再直接拉满进度条）
         const totalDuration = HHKAN_BOOT.splashDuration;
+        // ★ v8优化：进度条全程匀速循序渐进（每步固定 2%，50步正好100%），精确跟住 totalDuration
+        //   探测完成不再瞬间拉满进度条，避免"一下跑完"的突兀感
+        const PROG_STEPS = 50;
         const progTimer = setInterval(()=>{
-            animProgress += 2 + Math.random()*4;
+            animProgress += 100 / PROG_STEPS;
             if(animProgress > 100) animProgress = 100;
-            const p = Math.max(animProgress, probeProgress);
-            progressBar.style.width = p+'%';
-            if(p >= 100){ clearInterval(progTimer); }
-        }, totalDuration/50);
+            progressBar.style.width = animProgress.toFixed(1) + '%';
+            if(animProgress >= 100){ clearInterval(progTimer); }
+        }, totalDuration / PROG_STEPS);
 
         // ---- 提示语轮换 ----
-        const tips = ['正在为您准备精彩内容…','加载影视资源中…','气球升空，好戏即将开场 🎉','即将进入 好好看 ~'];
+        const tips = ['正在为您准备精彩内容…','加载二创资源中…','星光闪烁，好戏即将开场 ✨','即将进入 好好看—二创 ~'];
         let tipIdx = 0;
         const tipTimer = setInterval(()=>{
             tipIdx = (tipIdx+1)%tips.length;
@@ -567,11 +819,10 @@ waitDomReady(()=>{
 
         // ---- 探测回调：把探测过程实时回写到弹窗 ----
         function setTip(text){ splashTip.style.opacity='0'; setTimeout(()=>{ splashTip.textContent=text; splashTip.style.opacity='1'; }, 200); }
-        function onProbeTick(host, from){ if(host) splashUrl.textContent = host; }
+        function onProbeTick(host, from){ /* 探测过程已内嵌在进度条动画中，无需额外URL显示 */ }
         function onProbeDone(best, ranked){
-            splashUrl.textContent = best || '';
             probeProgress = 100;
-            setTip(ranked && ranked.length ? `已锁定最优镜像 ✅ ${best.replace(/^https?:\/\//,'')}` : '正在为您准备精彩内容…');
+            setTip(ranked && ranked.length ? `已连接 ✅` : '正在为您准备精彩内容…');
             // ★ v0.0.6：探测一完成即尝试提前收尾，避免死等动画整段时长
             if(typeof tryFinishEarly === 'function') tryFinishEarly();
         }
@@ -582,8 +833,10 @@ waitDomReady(()=>{
         function finish(){
             if(_finished) return;
             _finished = true;
-            clearInterval(typeTimer);clearInterval(subTimer);clearInterval(urlTimer);
+            clearInterval(typeTimer);clearInterval(subTimer);
             clearInterval(progTimer);clearInterval(tipTimer);
+            if(_glowRafId !== null){ cancelAnimationFrame(_glowRafId); _glowRafId = null; }
+            mask.removeEventListener('mousemove', _onSplashMouseMove);
             progressBar.style.width='100%';
             mask.classList.add('splash-fadeout');
             setTimeout(()=>{
@@ -858,7 +1111,7 @@ function getPlayerSettings(){
     def.videoMirror        = 'off';      // 镜像画面：'off' | 'horizontal' | 'vertical' | 'both'
     def.singleEpLoop       = false;      // 单集循环
     def.playMode           = 'autoNext'; // 播放方式：'autoNext' 自动切集 | 'pauseAfter' 播完暂停
-    def.audioEffect        = 'standard'; // 音效：standard/highDynamic/surround/clearVocal/bass/classic/rock/live/consonant/off
+    def.audioEffect        = 'off'; // 音效：默认关闭
     def.hideBlackBars      = false;      // 隐藏黑边
     def.theaterMode        = false;      // 关灯模式（页面变暗，仅突出播放器）
     // ★【修复 v0.1.5-1】删除原 `return def;` 死代码：它使下方 localStorage 读取逻辑永远不可达，
@@ -1432,6 +1685,7 @@ function bindVideoPlayer(videoEl){
         }
     });
     videoEl.addEventListener('durationchange', ()=>{ trySkipIntro(); });
+
     videoEl.addEventListener('timeupdate', ()=>{
         if(!introDone) trySkipIntro();
         // ---- 跳过片尾：剩余时间 <= 设定值时自动跳下一集 ----
@@ -1450,6 +1704,90 @@ function bindVideoPlayer(videoEl){
     }, true);
     // 切换视频源时重置片尾触发标记
     videoEl.addEventListener('loadedmetadata', ()=>{ videoEl._hhkanOutroFired = false; });
+
+    // ==================== ★ v7.2：自动跳过贴片广告（学习型） ====================
+    // 原理：影视站贴片广告的典型特征是——先播一段短广告(5~120秒)，
+    //       然后播放器切到正片(duration突然从短变长)。
+    //       第一次遇到时记录广告时长；之后再看同一片，自动 seek 过广告段。
+    (function setupAdSkip(){
+        const AD_MAP_KEY = 'hhkan_ad_skip_v1';
+        function readAdMap(){ try{ return JSON.parse(localStorage.getItem(AD_MAP_KEY)||'{}'); }catch(e){ return {}; } }
+        function writeAdMap(m){ try{ localStorage.setItem(AD_MAP_KEY, JSON.stringify(m)); }catch(e){} }
+        function curKey(){ try{ return (typeof currentMovieKey==='function') ? currentMovieKey() : (location.href||'').split('?')[0]; }catch(e){ return location.href||''; } }
+        // ★ v14：安全读取 SET.skipAds（IIFE 先于 `let SET` 定义执行，直接访问会 TDZ 崩溃）
+        function skipAdsEnabled(){ try { return (typeof SET !== 'undefined' && SET && SET.skipAds !== false); } catch(e){ return true; } }
+
+        let prevDur = 0;           // 上一次 duration（用于检测广告→正片突变）
+        let adLearned = false;      // 本 video 是否已学过广告时长
+        let adBtnShown = false;
+
+        // 显示"跳过广告"悬浮按钮
+        function showSkipBtn(sec){
+            if(adBtnShown || !skipAdsEnabled()) return;
+            adBtnShown = true;
+            var btn = document.createElement('div');
+            btn.textContent = '⏭ 跳过广告（' + Math.round(sec) + 's）';
+            btn.style.cssText = 'position:absolute;right:16px;bottom:60px;z-index:99999;background:rgba(0,0,0,.75);color:#fff;'
+                + 'padding:8px 16px;border-radius:20px;font-size:14px;cursor:pointer;border:1px solid rgba(255,255,255,.3);'
+                + 'transition:opacity .3s;';
+            btn.onclick = function(){
+                // 跳到正片结束位置（如果已知），否则跳到视频末尾
+                var k = curKey(), m = readAdMap();
+                var adEnd = (m[k] && m[k].adEnd) || (videoEl.duration || 60);
+                try{ videoEl.currentTime = adEnd; }catch(e){}
+                btn.style.opacity = '0';
+                setTimeout(function(){ btn.remove(); }, 300);
+            };
+            var container = videoEl.parentElement || document.body;
+            container.style.position = container.style.position || 'relative';
+            container.appendChild(btn);
+        }
+
+        videoEl.addEventListener('loadedmetadata', function(){
+            prevDur = (isFinite(videoEl.duration)) ? videoEl.duration : 0;
+            // 已有广告记录 → 自动跳过
+            if(!skipAdsEnabled()) return;
+            var k = curKey(), m = readAdMap();
+            var rec = m[k];
+            if(rec && rec.adEnd){
+                // 当前 duration 接近广告时长 → 说明正在播广告，自动跳到正片
+                if(prevDur > 0 && prevDur <= rec.adEnd + 5){
+                    try{
+                        videoEl.currentTime = rec.adEnd;
+                        if(typeof showFloatTip === 'function') showFloatTip('已自动跳过贴片广告 ' + Math.round(rec.adEnd) + ' 秒 🚫');
+                    }catch(e){}
+                }
+            }
+        });
+
+        videoEl.addEventListener('durationchange', function(){
+            if(!isFinite(videoEl.duration)) return;
+            var newDur = videoEl.duration;
+            // ★ 检测广告→正片突变：旧 duration 短(5~180秒)，新 duration 是旧的 2 倍以上
+            if(prevDur > 5 && prevDur < 180 && newDur > prevDur * 2 && !adLearned){
+                adLearned = true;
+                var adEnd = Math.round(prevDur);
+                // 学习记录：这部片的广告时长 = adEnd 秒
+                var k = curKey(), m = readAdMap();
+                // 不覆盖已有的更准确记录（除非新记录明显更合理）
+                if(!m[k] || !m[k].adEnd || Math.abs(m[k].adEnd - adEnd) > 3){
+                    m[k] = { adEnd: adEnd, learnedAt: Date.now() };
+                    writeAdMap(m);
+                    if(typeof showFloatTip === 'function') showFloatTip('已记录本片广告时长 ' + adEnd + ' 秒，下次自动跳过 ✅');
+                }
+            }
+            prevDur = newDur;
+        });
+
+        videoEl.addEventListener('timeupdate', function(){
+            if(!skipAdsEnabled() || adLearned) return;
+            if(!isFinite(videoEl.duration)) return;
+            // 当前 duration 很短(5~180秒) 且刚开始播放 → 大概率是贴片广告，显示跳过按钮
+            if(videoEl.duration > 5 && videoEl.duration < 180 && videoEl.currentTime < videoEl.duration - 3){
+                showSkipBtn(videoEl.duration - videoEl.currentTime);
+            }
+        });
+    })();
 
     // ---- ★ 功能三：视频源加载失败 → 自动切换到其他线路（错误源自动切换）----
     // 触发时机：video 触发 error 事件，且当前已探测到更优线路（LINE_PROBE_KEY.bestIdx）时才自动切，
@@ -1858,8 +2196,8 @@ function injectHhkanDarkCSS(){
 [data-pp-theme="dark"] .hc-head{ color:#f2f2f6 !important; }
 [data-pp-theme="dark"] .hc-close{ color:#9a9aa6 !important; }
 [data-pp-theme="dark"] .hc-close:hover{ color:#fff !important; background:#2e2e3c !important; }
-[data-pp-theme="dark"] .hc-clearall{ background:#2e1f22 !important; color:#ff9a9a !important; border-color:#5a3036 !important; }
-[data-pp-theme="dark"] .hc-clearall:hover{ background:#3a2529 !important; }
+[data-pp-theme="dark"] .hc-clearall{ background:transparent !important; color:#ff9a9a !important; border:none !important; }
+[data-pp-theme="dark"] .hc-clearall:hover{ background:rgba(229,57,53,.15) !important; }
 [data-pp-theme="dark"] .hc-item{ background:#1e1e28 !important; }
 [data-pp-theme="dark"] .hc-item-main{ color:#e2e2e8 !important; }
 [data-pp-theme="dark"] .hc-item-main:hover{ background:#26262f !important; }
@@ -2043,6 +2381,7 @@ function checkSupportBackdropFilter(){
         return false;
     }
     // 2 运行时实测：创建临时元素，看样式是否生效（解决部分 WebView 假支持）
+    if(!document.body) return false;  // body 未就绪时跳过检测
     var test = document.createElement('div');
     test.style.cssText = 'position:fixed; width:10px;height:10px;top:-200px;left:-200px; backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px);';
     document.body.appendChild(test);
@@ -2276,9 +2615,7 @@ html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-m
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask .fit-buttons button,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask .cp-action-btn,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-item,
-html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-btn,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-del,
-html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-clearall,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #episode-modal-box .ep-line-tab,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #episode-modal-box .ep-order-btn{
   background-color:var(--d-leaf) !important;
@@ -2313,14 +2650,16 @@ html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #episode-modal-bo
 /* ---------- D. 输入框/下拉：实底 + 聚焦主色环 ---------- */
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-enhance-settings input[type='number'],
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-enhance-settings input[type='text'],
+html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-enhance-settings input[type='color'],
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-enhance-settings select,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask input[type='number'],
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask input[type='text'],
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask select,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask .cp-name{
-  background-color:var(--d-input) !important;
-  border:1px solid var(--d-border) !important;
-  color:var(--d-text) !important;
+  background-color:rgba(30,30,40,.85) !important;
+  border:1px solid rgba(255,255,255,.25) !important;
+  color:#fff !important;
+  backdrop-filter:blur(8px);
 }
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-enhance-settings input:focus,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask input:focus,
@@ -2338,7 +2677,7 @@ html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-m
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask .fit-buttons button:not(.fit-active):hover,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #player-setting-mask .cp-action-btn:hover,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-item:hover,
-html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-btn:hover,
+
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #episode-modal-box .ep-line-tab:not(.ep-line-active):hover,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #episode-modal-box .ep-item:not(.ep-selected):hover,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #episode-modal-box .ep-order-btn:hover{
@@ -2496,9 +2835,7 @@ html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-m
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-bar > i{ background:var(--d-tint) !important; }
 /* 删除 / 清空：材质化警示色（仍保留红调语义） */
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-del,
-html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-clearall{
-  background:rgba(229,57,53,0.10) !important; border-color:rgba(229,57,53,0.34) !important; color:#e53935 !important;
-}
+
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-del:hover,
 html[data-hhkan-decoration]:not([data-hhkan-decoration='off']) #hhkan-continue-mask .hc-clearall:hover{
   background:#e53935 !important; color:#fff !important;
@@ -3053,7 +3390,7 @@ function sortByScoreDesc(arr){
 const REC_PER_CATEGORY   = 16;  // 每个分类每天固定推荐 16 部
 const REC_FETCH_PAGES    = 1;   // 频道单页已含 48~80 部（多板块）；旧版翻 2/3 页实为 404，iframe 空等数十秒 → 卡死「秒出」
 const REC_ENOUGH_SCORED  = 58;  // 带豆瓣评分候选达到该数量即停止翻页
-const REC_CACHE_VERSION  = 'v9';                       // 推荐缓存结构版本：升级即作废旧缓存，清掉旧版重复/错分类残留
+const REC_CACHE_VERSION  = 'v10';                       // 推荐缓存结构版本：升级即作废旧缓存，清掉旧版重复/错分类残留
 const REC_KEY_DAY        = 'rec_day_'+REC_CACHE_VERSION;
 const REC_KEY_DATA       = 'rec_data_'+REC_CACHE_VERSION;
 const REC_KEY_POOL       = 'rec_random_pool_'+REC_CACHE_VERSION;
@@ -3162,6 +3499,171 @@ async function _backfillRecCovers(rec){
 }
 // 兼容旧名
 async function _ensureRecCovers(rec){ return _backfillRecCovers(rec); }
+// ==================== ★ 每日诗句（按天轮换，带作者）====================
+const DAILY_POEMS = [
+    {t:"海内存知己，天涯若比邻。", a:"王勃《送杜少府之任蜀州》"},
+    {t:"欲穷千里目，更上一层楼。", a:"王之涣《登鹳雀楼》"},
+    {t:"春风又绿江南岸，明月何时照我还。", a:"王安石《泊船瓜洲》"},
+    {t:"但愿人长久，千里共婵娟。", a:"苏轼《水调歌头》"},
+    {t:"山重水复疑无路，柳暗花明又一村。", a:"陆游《游山西村》"},
+    {t:"沉舟侧畔千帆过，病树前头万木春。", a:"刘禹锡《酬乐天扬州初逢席上见赠》"},
+    {t:"不识庐山真面目，只缘身在此山中。", a:"苏轼《题西林壁》"},
+    {t:"春蚕到死丝方尽，蜡炬成灰泪始干。", a:"李商隐《无题》"},
+    {t:"海阔凭鱼跃，天高任鸟飞。", a:"《古今诗话》"},
+    {t:"会当凌绝顶，一览众山小。", a:"杜甫《望岳》"},
+    {t:"随风潜入夜，润物细无声。", a:"杜甫《春夜喜雨》"},
+    {t:"落红不是无情物，化作春泥更护花。", a:"龚自珍《己亥杂诗》"},
+    {t:"粉骨碎身浑不怕，要留清白在人间。", a:"于谦《石灰吟》"},
+    {t:"接天莲叶无穷碧，映日荷花别样红。", a:"杨万里《晓出净慈寺送林子方》"},
+    {t:"两岸猿声啼不住，轻舟已过万重山。", a:"李白《早发白帝城》"},
+    {t:"天生我材必有用，千金散尽还复来。", a:"李白《将进酒》"},
+    {t:"仰天大笑出门去，我辈岂是蓬蒿人。", a:"李白《南陵别儿童入京》"},
+    {t:"桃花潭水深千尺，不及汪伦送我情。", a:"李白《赠汪伦》"},
+    {t:"孤帆远影碧空尽，唯见长江天际流。", a:"李白《黄鹤楼送孟浩然之广陵》"},
+    {t:"明月松间照，清泉石上流。", a:"王维《山居秋暝》"},
+    {t:"大漠孤烟直，长河落日圆。", a:"王维《使至塞上》"},
+    {t:"劝君更尽一杯酒，西出阳关无故人。", a:"王维《送元二使安西》"},
+    {t:"莫愁前路无知己，天下谁人不识君。", a:"高适《别董大》"},
+    {t:"忽如一夜春风来，千树万树梨花开。", a:"岑参《白雪歌送武判官归京》"},
+    {t:"两岸青山相对出，孤帆一片日边来。", a:"李白《望天门山》"},
+    {t:"日出江花红胜火，春来江水绿如蓝。", a:"白居易《忆江南》"},
+    {t:"野火烧不尽，春风吹又生。", a:"白居易《赋得古原草送别》"},
+    {t:"同是天涯沦落人，相逢何必曾相识。", a:"白居易《琵琶行》"},
+    {t:"在天愿作比翼鸟，在地愿为连理枝。", a:"白居易《长恨歌》"},
+    {t:"曾经沧海难为水，除却巫山不是云。", a:"元稹《离思》"},
+    {t:"曾经沧海难为水，除却巫山不是云。", a:"元稹《离思》"},
+    {t:"身无彩凤双飞翼，心有灵犀一点通。", a:"李商隐《无题》"},
+    {t:"夕阳无限好，只是近黄昏。", a:"李商隐《乐游原》"},
+    {t:"何当共剪西窗烛，却话巴山夜雨时。", a:"李商隐《夜雨寄北》"},
+    {t:"问君能有几多愁，恰似一江春水向东流。", a:"李煜《虞美人》"},
+    {t:"剪不断，理还乱，是离愁，别是一般滋味在心头。", a:"李煜《相见欢》"},
+    {t:"无可奈何花落去，似曾相识燕归来。", a:"晏殊《浣溪沙》"},
+    {t:"衣带渐宽终不悔，为伊消得人憔悴。", a:"柳永《蝶恋花》"},
+    {t:"众里寻他千百度，蓦然回首，那人却在灯火阑珊处。", a:"辛弃疾《青玉案》"},
+    {t:"稻花香里说丰年，听取蛙声一片。", a:"辛弃疾《西江月》"},
+    {t:"少年不识愁滋味，爱上层楼。", a:"辛弃疾《丑奴儿》"},
+    {t:"生当作人杰，死亦为鬼雄。", a:"李清照《夏日绝句》"},
+    {t:"莫道不销魂，帘卷西风，人比黄花瘦。", a:"李清照《醉花阴》"},
+    {t:"寻寻觅觅，冷冷清清，凄凄惨惨戚戚。", a:"李清照《声声慢》"},
+    {t:"莫等闲，白了少年头，空悲切。", a:"岳飞《满江红》"},
+    {t:"三十功名尘与土，八千里路云和月。", a:"岳飞《满江红》"},
+    {t:"人生自古谁无死，留取丹心照汗青。", a:"文天祥《过零丁洋》"},
+    {t:"山外青山楼外楼，西湖歌舞几时休。", a:"林升《题临安邸》"},
+    {t:"王师北定中原日，家祭无忘告乃翁。", a:"陆游《示儿》"},
+    {t:"夜阑卧听风吹雨，铁马冰河入梦来。", a:"陆游《十一月四日风雨大作》"},
+    {t:"纸上得来终觉浅，绝知此事要躬行。", a:"陆游《冬夜读书示子聿》"},
+    {t:"小楼一夜听春雨，深巷明朝卖杏花。", a:"陆游《临安春雨初霁》"},
+    {t:"位卑未敢忘忧国，事定犹须待阖棺。", a:"陆游《病起书怀》"},
+    {t:"人生如逆旅，我亦是行人。", a:"苏轼《临江仙》"},
+    {t:"但愿人长久，千里共婵娟。", a:"苏轼《水调歌头》"},
+    {t:"大江东去，浪淘尽，千古风流人物。", a:"苏轼《念奴娇·赤壁怀古》"},
+    {t:"不识庐山真面目，只缘身在此山中。", a:"苏轼《题西林壁》"},
+    {t:"欲把西湖比西子，淡妆浓抹总相宜。", a:"苏轼《饮湖上初晴后雨》"},
+    {t:"竹外桃花三两枝，春江水暖鸭先知。", a:"苏轼《惠崇春江晚景》"},
+    {t:"粗缯大布裹生涯，腹有诗书气自华。", a:"苏轼《和董传留别》"},
+    {t:"回首向来萧瑟处，归去，也无风雨也无晴。", a:"苏轼《定风波》"},
+    {t:"十年生死两茫茫，不思量，自难忘。", a:"苏轼《江城子》"},
+    {t:"枝上柳绵吹又少，天涯何处无芳草。", a:"苏轼《蝶恋花》"},
+    {t:"人有悲欢离合，月有阴晴圆缺。", a:"苏轼《水调歌头》"},
+    {t:"谁道人生无再少？门前流水尚能西！", a:"苏轼《浣溪沙》"},
+    {t:"且将新火试新茶，诗酒趁年华。", a:"苏轼《望江南》"},
+    {t:"月落乌啼霜满天，江枫渔火对愁眠。", a:"张继《枫桥夜泊》"},
+    {t:"姑苏城外寒山寺，夜半钟声到客船。", a:"张继《枫桥夜泊》"},
+    {t:"少小离家老大回，乡音无改鬓毛衰。", a:"贺知章《回乡偶书》"},
+    {t:"不知细叶谁裁出，二月春风似剪刀。", a:"贺知章《咏柳》"},
+    {t:"野旷天低树，江清月近人。", a:"孟浩然《宿建德江》"},
+    {t:"春眠不觉晓，处处闻啼鸟。", a:"孟浩然《春晓》"},
+    {t:"气蒸云梦泽，波撼岳阳城。", a:"孟浩然《望洞庭湖赠张丞相》"},
+    {t:"白日依山尽，黄河入海流。", a:"王之涣《登鹳雀楼》"},
+    {t:"羌笛何须怨杨柳，春风不度玉门关。", a:"王之涣《凉州词》"},
+    {t:"黄河远上白云间，一片孤城万仞山。", a:"王之涣《凉州词》"},
+    {t:"葡萄美酒夜光杯，欲饮琵琶马上催。", a:"王翰《凉州词》"},
+    {t:"劝君莫惜金缕衣，劝君惜取少年时。", a:"杜秋娘《金缕衣》"},
+    {t:"花开堪折直须折，莫待无花空折枝。", a:"杜秋娘《金缕衣》"},
+    {t:"欲把西湖比西子，淡妆浓抹总相宜。", a:"苏轼《饮湖上初晴后雨》"},
+    {t:"山外青山楼外楼，西湖歌舞几时休。", a:"林升《题临安邸》"},
+    {t:"接天莲叶无穷碧，映日荷花别样红。", a:"杨万里《晓出净慈寺送林子方》"},
+    {t:"小荷才露尖尖角，早有蜻蜓立上头。", a:"杨万里《小池》"},
+    {t:"泉眼无声惜细流，树阴照水爱晴柔。", a:"杨万里《小池》"},
+    {t:"日长睡起无情思，闲看儿童捉柳花。", a:"杨万里《闲居初夏午睡起》"},
+    {t:"等闲识得东风面，万紫千红总是春。", a:"朱熹《春日》"},
+    {t:"问渠那得清如许，为有源头活水来。", a:"朱熹《观书有感》"},
+    {t:"少年易老学难成，一寸光阴不可轻。", a:"朱熹《偶成》"},
+    {t:"半亩方塘一鉴开，天光云影共徘徊。", a:"朱熹《观书有感》"},
+    {t:"绿阴不减来时路，添得黄鹂四五声。", a:"曾几《三衢道中》"},
+    {t:"梅子黄时日日晴，小溪泛尽却山行。", a:"曾几《三衢道中》"},
+    {t:"爆竹声中一岁除，春风送暖入屠苏。", a:"王安石《元日》"},
+    {t:"千门万户曈曈日，总把新桃换旧符。", a:"王安石《元日》"},
+    {t:"遥知不是雪，为有暗香来。", a:"王安石《梅花》"},
+    {t:"春风又绿江南岸，明月何时照我还。", a:"王安石《泊船瓜洲》"},
+    {t:"不畏浮云遮望眼，自缘身在最高层。", a:"王安石《登飞来峰》"},
+    {t:"墙角数枝梅，凌寒独自开。", a:"王安石《梅花》"},
+    {t:"春色满园关不住，一枝红杏出墙来。", a:"叶绍翁《游园不值》"},
+    {t:"萧萧梧叶送寒声，江上秋风动客情。", a:"叶绍翁《夜书所见》"},
+    {t:"意欲捕鸣蝉，忽然闭口立。", a:"袁枚《所见》"},
+    {t:"牧童骑黄牛，歌声振林樾。", a:"袁枚《所见》"},
+    {t:"白日放歌须纵酒，青春作伴好还乡。", a:"杜甫《闻官军收河南河北》"},
+    {t:"读书破万卷，下笔如有神。", a:"杜甫《奉赠韦左丞丈二十二韵》"},
+    {t:"会当凌绝顶，一览众山小。", a:"杜甫《望岳》"},
+    {t:"烽火连三月，家书抵万金。", a:"杜甫《春望》"},
+    {t:"露从今夜白，月是故乡明。", a:"杜甫《月夜忆舍弟》"},
+    {t:"安得广厦千万间，大庇天下寒士俱欢颜。", a:"杜甫《茅屋为秋风所破歌》"},
+    {t:"两个黄鹂鸣翠柳，一行白鹭上青天。", a:"杜甫《绝句》"},
+    {t:"窗含西岭千秋雪，门泊东吴万里船。", a:"杜甫《绝句》"},
+    {t:"留连戏蝶时时舞，自在娇莺恰恰啼。", a:"杜甫《江畔独步寻花》"},
+    {t:"晓看红湿处，花重锦官城。", a:"杜甫《春夜喜雨》"},
+    {t:"迟日江山丽，春风花草香。", a:"杜甫《绝句二首》"},
+    {t:"泥融飞燕子，沙暖睡鸳鸯。", a:"杜甫《绝句二首》"},
+    {t:"江碧鸟逾白，山青花欲燃。", a:"杜甫《绝句二首》"},
+    {t:"今春看又过，何日是归年。", a:"杜甫《绝句二首》"},
+    {t:"随风潜入夜，润物细无声。", a:"杜甫《春夜喜雨》"},
+    {t:"野径云俱黑，江船火独明。", a:"杜甫《春夜喜雨》"},
+    {t:"晓看红湿处，花重锦官城。", a:"杜甫《春夜喜雨》"},
+    {t:"国破山河在，城春草木深。", a:"杜甫《春望》"},
+    {t:"感时花溅泪，恨别鸟惊心。", a:"杜甫《春望》"},
+    {t:"白头搔更短，浑欲不胜簪。", a:"杜甫《春望》"},
+    {t:"吴楚东南坼，乾坤日夜浮。", a:"杜甫《登岳阳楼》"},
+    {t:"亲朋无一字，老病有孤舟。", a:"杜甫《登岳阳楼》"},
+    {t:"无边落木萧萧下，不尽长江滚滚来。", a:"杜甫《登高》"},
+    {t:"万里悲秋常作客，百年多病独登台。", a:"杜甫《登高》"},
+    {t:"出师未捷身先死，长使英雄泪满襟。", a:"杜甫《蜀相》"},
+    {t:"映阶碧草自春色，隔叶黄鹂空好音。", a:"杜甫《蜀相》"},
+    {t:"安得广厦千万间，大庇天下寒士俱欢颜。", a:"杜甫《茅屋为秋风所破歌》"},
+    {t:"八月秋高风怒号，卷我屋上三重茅。", a:"杜甫《茅屋为秋风所破歌》"},
+    {t:"安得广厦千万间，大庇天下寒士俱欢颜。", a:"杜甫《茅屋为秋风所破歌》"},
+    {t:"卖炭翁，伐薪烧炭南山中。", a:"白居易《卖炭翁》"},
+    {t:"满面尘灰烟火色，两鬓苍苍十指黑。", a:"白居易《卖炭翁》"},
+    {t:"可怜身上衣正单，心忧炭贱愿天寒。", a:"白居易《卖炭翁》"},
+    {t:"在天愿作比翼鸟，在地愿为连理枝。", a:"白居易《长恨歌》"},
+    {t:"天长地久有时尽，此恨绵绵无绝期。", a:"白居易《长恨歌》"},
+    {t:"回眸一笑百媚生，六宫粉黛无颜色。", a:"白居易《长恨歌》"},
+    {t:"野火烧不尽，春风吹又生。", a:"白居易《赋得古原草送别》"},
+    {t:"远芳侵古道，晴翠接荒城。", a:"白居易《赋得古原草送别》"},
+    {t:"又送王孙去，萋萋满别情。", a:"白居易《赋得古原草送别》"},
+    {t:"乱花渐欲迷人眼，浅草才能没马蹄。", a:"白居易《钱塘湖春行》"},
+    {t:"最爱湖东行不足，绿杨阴里白沙堤。", a:"白居易《钱塘湖春行》"},
+    {t:"几处早莺争暖树，谁家新燕啄春泥。", a:"白居易《钱塘湖春行》"},
+    {t:"孤山寺北贾亭西，水面初平云脚低。", a:"白居易《钱塘湖春行》"},
+    {t:"日出江花红胜火，春来江水绿如蓝。", a:"白居易《忆江南》"},
+    {t:"江南好，风景旧曾谙。", a:"白居易《忆江南》"},
+    {t:"能不忆江南？", a:"白居易《忆江南》"},
+    {t:"同是天涯沦落人，相逢何必曾相识。", a:"白居易《琵琶行》"},
+    {t:"千呼万唤始出来，犹抱琵琶半遮面。", a:"白居易《琵琶行》"},
+    {t:"别有幽愁暗恨生，此时无声胜有声。", a:"白居易《琵琶行》"},
+    {t:"银瓶乍破水浆迸，铁骑突出刀枪鸣。", a:"白居易《琵琶行》"},
+    {t:"东船西舫悄无言，唯见江心秋月白。", a:"白居易《琵琶行》"},
+    {t:"今年欢笑复明年，秋月春风等闲度。", a:"白居易《琵琶行》"},
+    {t:"门前冷落鞍马稀，老大嫁作商人妇。", a:"白居易《琵琶行》"},
+    {t:"夜深忽梦少年事，梦啼妆泪红阑干。", a:"白居易《琵琶行》"},
+    {t:"我闻琵琶已叹息，又闻此语重唧唧。", a:"白居易《琵琶行》"},
+    {t:"莫辞更坐弹一曲，为君翻作琵琶行。", a:"白居易《琵琶行》"},
+    {t:"座中泣下谁最多？江州司马青衫湿。", a:"白居易《琵琶行》"},
+];
+function getDailyPoem(){
+    const day = Math.floor(Date.now() / 86400000);
+    return DAILY_POEMS[day % DAILY_POEMS.length];
+}
+
 // ==================== ★ 每日零点自动更新机制 ★ ====================
 function getTodayStr(){
     const d = new Date();
@@ -3198,6 +3700,12 @@ function startRecommendCountdown(mask){
             cEl.textContent = timeStr;
             cEl.setAttribute('data-mins', String(totalMins));
         }
+        const pEl = mask && mask.querySelector('#rec-poem');
+        if(pEl && !pEl.dataset.set){
+            const pm = getDailyPoem();
+            pEl.innerHTML = '📜 <em>'+pm.t+'</em> <span>—— '+pm.a+'</span>';
+            pEl.dataset.set = '1';
+        }
         // 倒计时归零 → 等零点一过立刻重算，无需外部通知
         if(secLeft <= 0) tick();
     }
@@ -3232,6 +3740,7 @@ function scheduleDailyRefresh(){
 // 页面加载时启动每日零点调度
 scheduleDailyRefresh();
 // ★ 启动后台预热：DOM 就绪后静默生成今日名单，用户点开「每日推荐」即秒出（命中缓存，无 loading）
+// ★ 问题三修复：延迟5秒再开始后台抓取，避免刚打开页面就发请求触发限速
 function warmupDailyRecommend(){
     waitDomReady(function(){
         setTimeout(function(){
@@ -3239,7 +3748,7 @@ function warmupDailyRecommend(){
                 const p = getDailyRecommend(false);
                 if(p && typeof p.catch==='function') p.catch(function(){});
             }catch(e){}
-        }, 1200);
+        }, 5000);
     });
 }
 warmupDailyRecommend();
@@ -3252,8 +3761,18 @@ setInterval(()=>{
         localStorage.removeItem(REC_KEY_DATA);
         localStorage.removeItem(REC_KEY_POOL);
         console.log('[每日推荐] 日期变更检测：推荐名单已自动更新');
+        // ★ 如果推荐弹窗当前打开，立即重新生成并刷新
+        if(document.querySelector('#recommend-modal-mask')){
+            (async ()=>{
+                try{
+                    const rec = await getDailyRecommend(true);
+                    const m2 = document.querySelector('#recommend-modal-mask');
+                    if(m2){ renderRecommendContent(m2, rec); startRecommendCountdown(m2); }
+                }catch(e){ console.warn('[每日推荐] 跨天刷新失败', e); }
+            })();
+        }
     }
-}, 60000);
+}, 30000);
 // ==================== 背景图库 · 随机壁纸（内嵌 · 不叠加 · 不重复 · 彩色主题）====================
 // ★ 优化二 · 设计要点（解决「壁纸黑白」+「分类与图片不符」两个核心问题）：
 //   ① 图源改为【彩色主题化壁纸】：每个分类重新规划，每类配置专属的「主色 / 辅色 / 点缀色 /
@@ -3599,6 +4118,10 @@ async function fetchMoviesFromSite(category, page = 1){
             const xhr = new XMLHttpRequest();
             xhr.timeout = 8000;
             xhr.open('GET', url, true);
+            // ★ 防WAF限速：伪装成正常浏览器请求
+            xhr.setRequestHeader('Referer', location.origin + '/');
+            xhr.setRequestHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
+            xhr.setRequestHeader('Accept-Language', 'zh-CN,zh;q=0.9');
             xhr.onload = function(){
                 if(xhr.status === 200){
                     const html = xhr.responseText;
@@ -4027,6 +4550,7 @@ function closeRecommendModal(){
         searchTimerRef = null;
     }
     // 弹窗关闭后恢复悬浮球显示，并重新对齐到视频框左上角
+    document.body.style.overflow = '';
     const ball = document.querySelector('#hhkan-float-ball');
     if(ball){
         ball.classList.remove('fb-hidden-by-modal');
@@ -4048,7 +4572,9 @@ function closeRecommendModal(){
 //      40  APP 下载（最次要，随时可被覆盖）
 const MODAL_REGISTRY = [
     { id: 'local-player-mask',     priority: 100 }, // 本地播放器（正在播放，最高优先）
+    { id: 'pake-disclaimer-mask',  priority: 95  }, // ★ 更新公告弹窗（v0.2.5新增）
     { id: 'hhkan-continue-mask',   priority: 90  }, // ★ 继续观看
+    { id: 'hhk-fav-mask',          priority: 85  }, // ★ 我的收藏
     { id: 'hhkan-enhance-settings',priority: 80  }, // ★ 全局设置
     { id: 'episode-modal-mask',    priority: 70  }, // 选集/线路弹窗
     { id: 'player-setting-mask',   priority: 60  }, // 播放器设置
@@ -4112,6 +4638,18 @@ function closeModalById(id){
         if(mask) mask.remove();
         return;
     }
+    // ---- 我的收藏：直接 remove（v0.2.5新增）----
+    if(id === 'hhk-fav-mask'){
+        const mask = document.querySelector('#' + id);
+        if(mask) mask.remove();
+        return;
+    }
+    // ---- 更新公告：直接 remove（v0.2.5新增）----
+    if(id === 'pake-disclaimer-mask'){
+        const mask = document.querySelector('#' + id);
+        if(mask) mask.remove();
+        return;
+    }
     // ---- 其余弹窗（选集 / 播放设置 / APP）：无特殊资源，直接 remove ----
     const el = document.querySelector('#' + id);
     if(el) el.remove();
@@ -4119,22 +4657,20 @@ function closeModalById(id){
 
 /**
  * ★ 打开新弹窗前的统一闸门（被各 openXxxModal 函数调用）。
- * 规则：
- *   1) 若已存在「优先级 >= 新弹窗」的弹窗 → 本次打开被抑制（保留高优先级弹窗）
- *   2) 否则 → 关闭所有已开的、优先级低于本次弹窗的弹窗，再允许打开
+ * ★ v0.2.5 简化规则：同时只允许一个弹窗打开，
+ *   打开任何新弹窗时，自动关闭所有其他已打开的弹窗。
  */
 function requestOpenModal(newId){
-    const newPri = getModalPriority(newId);
-    const top = getTopOpenModal();
-    if(top && top.priority >= newPri && top.id !== newId){
-        console.log('[弹窗优先级] 抑制打开', newId, '，当前高优先级弹窗:', top.id);
+    // 重复打开同一个弹窗，不重复处理
+    if (document.querySelector('#' + newId)) {
+        console.log('[弹窗管理] 弹窗已打开:', newId);
         return false;
     }
-    // 关闭所有已开的、优先级低于本次的弹窗（"打开谁，关掉比它低的"）
+    // 关闭所有其他已打开的弹窗
     MODAL_REGISTRY.forEach(m => {
         if(m.id === newId) return;
-        if(document.querySelector('#' + m.id) && m.priority < newPri){
-            console.log('[弹窗优先级] 关闭低优先级弹窗:', m.id, '以打开', newId);
+        if(document.querySelector('#' + m.id)){
+            console.log('[弹窗管理] 关闭旧弹窗:', m.id, '以打开新弹窗', newId);
             closeModalById(m.id);
         }
     });
@@ -4234,7 +4770,11 @@ function saveSelectRecord(record){
     localStorage.setItem(SELECT_RECORD_KEY, JSON.stringify({...getSelectRecord(), ...record}));
 }
 function hasVideoElement(){
-    return !!document.querySelector('video');
+    const v = document.querySelector('video');
+    if(!v) return false;
+    // 本地播放器的 video 不算「进入播放页」
+    if(v.closest && v.closest('#local-player-mask')) return false;
+    return true;
 }
 function getVideoBounds(){
     const video = document.querySelector('video');
@@ -4476,13 +5016,39 @@ function mapLineName(originalName, index){
 }
 // ========== 电影页面检测 ==========
 function isMoviePage(){
-    // ★ v7：更严格识别「单集影片」，避免电视剧/动漫/综艺被误判为电影而丢失集数/更新检测
+    // ★ v14：彻底重写电影/剧集判定顺序——
+    //   最权威的是「DOM 选集列表里有没有 ≥2 个不同集号」，
+    //   不再因为 URL 里出现 "movie" 就直接判电影（播放页 /movie/123/45.html 会被误杀）。
     const url = location.href.toLowerCase();
-    // ★ 综艺/动漫：即使 URL 含 variety/综艺 也按「有选集的剧集类」处理（综艺按「期」编号，仍是多集，非电影）
-    if(/variety|综艺|zongyi/.test(url)) return false;
-    if(/movie|film|单集/.test(url)) return true;
-    // ★【修复】结构化数据辅助判定（og:type / JSON-LD 权威优先），
-    //   避免仅靠 URL/文本特征误判电影或剧集。
+
+    // 1) 先数 DOM 里所有选集链接（最权威）
+    const listSelectors = [
+        '.module-play-list', '.play-list', '.episode-list', '.episode-list-box',
+        '.anthology-list', '.num-list', '.play-box-list', '.video-list',
+        '.ep-list', '.play-item-list', '.list-play', '.play-wrap',
+        '.stui-content__playlist', '.module-play-list-box', '.vod-play-list'
+    ];
+    let totalEps = 0, maxNum = 0;
+    for(const sel of listSelectors){
+        const lists = document.querySelectorAll(sel);
+        lists.forEach(list => {
+            list.querySelectorAll('a[href]').forEach(a => {
+                const t = (a.textContent||'').trim();
+                const n = (typeof parseEpisodeNumber==='function') ? parseEpisodeNumber(t) : 0;
+                if(n > 0){ totalEps++; if(n > maxNum) maxNum = n; }
+            });
+        });
+    }
+    // 有 ≥2 个不同集号 → 铁定不是电影（电影不可能有第2集/第2期）
+    if(maxNum >= 2) return false;
+    if(totalEps >= 2) return false;
+
+    // 2) 页面文本证据
+    const pageText = document.body ? (document.body.innerText||'') : '';
+    if(/选集|分集|剧集|连载|更新至|综艺|真人秀|共\s*\d+\s*(?:集|期)/.test(pageText)) return false;
+    if(/第\s*[\d一二三四五六七八九十百]+\s*(?:集|期)/.test(pageText)) return false;
+
+    // 3) og:type / JSON-LD（权威元数据）
     try{
         const ogType = document.querySelector('meta[property="og:type"]');
         if(ogType && ogType.content){
@@ -4498,41 +5064,23 @@ function isMoviePage(){
             }
         }
     }catch(e){}
-    const listSelectors = [
-        '.module-play-list', '.play-list', '.episode-list', '.episode-list-box',
-        '.anthology-list', '.num-list', '.play-box-list', '.video-list',
-        '.ep-list', '.play-item-list', '.list-play', '.play-wrap'
-    ];
-    // ★ 只统计「带集数特征的真实集数链接」，避免非集数链接干扰计数
-    //   （parseEpisodeNumber 已支持「期」，综艺第1期/第2期 也会被计入）
-    let totalEps = 0, maxNum = 0;
-    for(const sel of listSelectors){
-        const lists = document.querySelectorAll(sel);
-        lists.forEach(list => {
-            list.querySelectorAll('a[href]').forEach(a => {
-                const t = (a.textContent||'').trim();
-                const n = (typeof parseEpisodeNumber==='function') ? parseEpisodeNumber(t) : 0;
-                if(n > 0){ totalEps++; if(n > maxNum) maxNum = n; }
-            });
-        });
-    }
-    // ★ 存在「第2集/第2期」及以后 → 铁定是剧集（电影不可能有第2集）
-    if(maxNum >= 2) return false;
-    if(totalEps >= 2) return false;
-    const pageText = document.body ? (document.body.innerText||'') : '';
-    // ★ 综艺标记：共X期 / 第X期 / 综艺 / 真人秀 → 有选集，非电影
-    if(/选集|分集|剧集|连载|更新至|综艺|真人秀|共\s*\d+\s*(?:集|期)/.test(pageText)) return false;
-    if(/第\s*[\d一二三四五六七八九十百]+\s*(?:集|期)/.test(pageText)) return false;
-    // ★【修复】播放页（/play/）只检测到 1 个集数链接时，不再默认判为电影：
-    //   新综艺/新剧只更新 1 期（集）时会被误判为电影而丢失选集/更新检测；
-    //   仅当存在明确「电影证据」（movie 路径 / 页面明确标注电影）才判定为电影。
-    if(/\/play\//.test(url)){
-        if(totalEps <= 0) return true;   // 播放页完全无选集链接 → 视为单源/单集
-        const movieEvidence =
-            /\/movie\//.test(url) ||
+
+    // 4) URL 辅助判断（最后才用，且要区分详情页/播放页）
+    //    播放页格式 /movie/123/45.html（两级路径有集号）不判电影
+    //    只有详情页 /movie/123.html（一级路径 .html）才可能是电影
+    var isDetailMovie = /^.*\/movie\/\d+\.html/.test(url);
+    var isPlayPage = /\/(?:play|vodplay|movie|tv|anime|variety|short)\/\d+\/\d+/.test(url) || /\/play\//.test(url);
+    if(isPlayPage){
+        // 播放页但数不到多集：只有明确电影证据才判电影
+        if(totalEps <= 0) return true;
+        var movieEvidence =
+            isDetailMovie ||
             /电影|院线|影片详情|单片/.test(pageText.slice(0,1200));
         return movieEvidence && totalEps <= 2;
     }
+    if(isDetailMovie) return true;
+
+    // 5) 兜底：数不到多集，也没有剧集文本证据，按单集处理
     if(totalEps <= 2 && totalEps > 0) return true;
     if(!/选集|分集|剧集|第\d+集/.test(pageText) && totalEps <= 3) return true;
     return false;
@@ -5079,34 +5627,99 @@ function resolveHhkanCover(src){
 //   旧实现直接打 hhkanHost()，一旦与当前页不同域就会因跨域全部失败，
 //   表现为「选集弹窗封面不显示 / 简介一直加载中」。
 function detailHostQueue(){
-    var list = [];
+    // ★ v14：只返回当前域名，不再跨镜像抓详情页（避免 CORS 报错 + 抓不到）
     try{
         var cur = (location.origin || '').replace(/\/+$/,'');
-        if(cur && /^https?:/i.test(cur)) list.push(cur);
+        if(cur && /^https?:/i.test(cur)) return [cur];
     }catch(e){}
     try{
         var h = (typeof hhkanHost==='function') ? (hhkanHost()||'') : '';
         h = String(h||'').replace(/\/+$/,'');
-        if(h && list.indexOf(h) < 0) list.push(h);
+        if(h) return [h];
     }catch(e){}
-    try{
-        if(typeof getHhkanCandidates === 'function'){
-            getHhkanCandidates().forEach(function(c){
-                var hs = '';
-                try{ hs = (typeof _toHost==='function') ? _toHost(c) : ((c && c.host) ? c.host : String(c||'')); }
-                catch(e){ hs = (c && c.host) ? c.host : String(c||''); }
-                hs = String(hs||'').replace(/\/+$/,'');
-                if(hs && list.indexOf(hs) < 0) list.push(hs);
-            });
-        }
-    }catch(e){}
-    return list.length ? list : [(location.origin || '')];
+    return [(location.origin || '')];
 }
 // ★ v9：详情页路径候选（真实站点权威路由 /detail/id.html 排第一，其余仅兼容其它模板）
 function detailPathQueue(id){
     var idEnc = encodeURIComponent(id || '');
     return ['/detail/','/movie/','/tv/','/anime/','/variety/','/short/'].map(function(p){ return p + idEnc + '.html'; });
 }
+
+// ====================================================================
+// v13 共享：从详情页 HTML 解析「真实总集数 / 总期数」
+// 核心思路：直接从 HTML 文本正则提取播放链接 /{type}/{vod_id}/{ep_id}.html，
+//   按 vod_id 分组，数每组不同 ep_id 的数量 = 那条线路的集数，取最大值。
+//   不依赖 DOM querySelectorAll（XHR 拿到的 HTML 可能没渲染完），纯文本正则最稳。
+// 修复版优先级：①【权威】播放链接按 vod_id 分组，数每组集数取最多（线路集数最多的那条）
+//              ②仅当①完全抓不到线路链接时，才退化为页面文本正则「共N集/更新至第N集」兜底
+//              ③仅当①②都抓不到时，全文最大第N集编号兜底
+//   ★ 不再让整页文本（含侧边推荐/相关影片卡片）的"更新至第N集"覆盖真实线路计数。
+// ====================================================================
+window.__hhkanParseTotalEpsFromHtml = function(html){
+    if(!html || typeof html !== 'string') return 0;
+    var total = 0;
+
+    // 1) 【权威】核心：正则提取所有播放链接，按 vod_id 分组，数不同 ep_id 数量，取最大值
+    //    播放链接格式：/play/123/456.html  /vodplay/123/456.html  /movie/123/456.html 等
+    //    —— 这就是「线路集数最多的那条」：每条线路=一个 vod_id，该线路有多少个不同 ep_id 就是多少集。
+    var maxByGroup = 0;
+    try{
+        var vodGroups = {};  // vod_id -> { ep_id: true }
+        var re = /(?:play|vodplay|movie|detail|tv|anime|variety|short)\/(\d+)\/(\d+)/gi;
+        var mm;
+        while((mm = re.exec(html)) !== null){
+            var vid = mm[1];
+            var epid = parseInt(mm[2], 10) || 0;
+            if(epid <= 0 || epid > 9999) continue;
+            if(!vodGroups[vid]) vodGroups[vid] = {};
+            vodGroups[vid][epid] = true;
+        }
+        // 数每个 vod_id 组里不同 ep_id 的数量，取最大
+        for(var vid in vodGroups){
+            var cnt = 0;
+            for(var ep in vodGroups[vid]) cnt++;
+            if(cnt > maxByGroup) maxByGroup = cnt;
+        }
+    }catch(e){}
+    // ★ 只要真实线路抓到了集数，就以它为准，不再被整页文本污染值覆盖
+    if(maxByGroup > 0){
+        total = maxByGroup;
+        return total || 0;
+    }
+
+    // 2) 【兜底·仅当完全抓不到线路链接】页面文本：共N集 / 全N集 / 更新至第N集 / 完结全N集
+    var textPatterns = [
+        /共\s*(\d+)\s*(?:集|期)/g,
+        /全\s*(\d+)\s*(?:集|期)/g,
+        /更新至\s*第?\s*(\d+)\s*(?:集|期)/g,
+        /已更新?\s*第?\s*(\d+)\s*(?:集|期)/g,
+        /完结[\/\s]*全?\s*(\d+)\s*(?:集|期)/g
+    ];
+    for(var pi=0; pi<textPatterns.length; pi++){
+        var m;
+        textPatterns[pi].lastIndex = 0;
+        while((m = textPatterns[pi].exec(html)) !== null){
+            var n = parseInt(m[1], 10) || 0;
+            if(n > total) total = n;
+        }
+    }
+
+    // 3) 【兜底·仍为0时】全文最大「第N集/话/期」编号
+    if(total <= 0){
+        try{
+            var maxN = 0, re2 = /第?\s*(\d+)\s*(?:集|话|期)/g, mm2;
+            while((mm2 = re2.exec(html)) !== null){
+                var n2 = parseInt(mm2[1], 10) || 0;
+                if(n2 > 0 && n2 < 1000 && n2 > maxN) maxN = n2;
+            }
+            if(maxN > total) total = maxN;
+        }catch(e){}
+    }
+
+    // 4) ä¸ååãçæ ç­¾âçµå½±ãæ¨æ­ï¼9atotal=0 å°±æ¯æ²¡æå°
+    //    çæ­£ç±»åå¤å®é å½åæ­æ¾é¡µ DOM ç hhkanContentType()
+    return total || 0;
+};
 // ==================== ★ 从当前最优镜像的对应影片详情页提取海报 ★ ====================
 // ★ v9 修复要点：
 //   1) 同域优先 → 最优镜像 → 其它候选（避免跨域 XHR 全军覆没导致封面永远抓不到）；
@@ -5144,6 +5757,10 @@ function fetchHhkanPoster(title, id){
                 var xhr = new XMLHttpRequest();
                 xhr.timeout = 6000;
                 xhr.open('GET', url, true);
+                // ★ 防WAF限速：伪装成正常浏览器请求
+                xhr.setRequestHeader('Referer', location.origin + '/');
+                xhr.setRequestHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
+                xhr.setRequestHeader('Accept-Language', 'zh-CN,zh;q=0.9');
                 xhr.onload = function(){
                     if(xhr.status !== 200){ tryNext(); return; }
                     var d = parseDetailFromHtml(xhr.responseText);
@@ -5734,6 +6351,8 @@ function showResumeBar(item){
     let kind = item.kind || 'movie';
     if (kind === 'series' && total === 1) kind = 'movie';
     if (kind === 'series' && total <= 0 && ep === 0) kind = 'movie';
+    // ★ v7.1：单集记录但标题无剧集特征词 → 电影（修复"功夫女足"类误判）
+    if (kind === 'series' && total <= 2 && (ep <= 1) && !/剧|季|番|辑|连载/.test(item.title||'')) kind = 'movie';
     // ★ 五类：综艺按「期」，连续剧 / 动漫 / 短剧按「集」，电影不拼接集数
     const unit = item.unit || ((kind === 'variety') ? '期' : '集');
     const isEpKind = (kind === 'series' || kind === 'variety' || kind === 'anime' || kind === 'short');
@@ -5780,7 +6399,14 @@ function showResumeBar(item){
             try{ v.currentTime = item.currentTime; v.play().catch(()=>{}); }catch(e){}
         }else if(item.url && item.url !== location.href){
             // 跨影片：跳转过去后由该页自动恢复进度
-            location.href = item.url; return;
+            // ★ 问题一修复：自动用当前域名，不跳转到收藏时的原网址
+            try {
+                var u = new URL(item.url, location.origin);
+                location.href = location.origin + u.pathname + u.search;
+            } catch (err) {
+                location.href = item.url;
+            }
+            return;
         }
         dismiss(false);
     };
@@ -6296,48 +6922,59 @@ function buildEpisodeModal(lines){
         });
     }
 
-    // 自动滚动到当前正在播放的集数（基于选择记录：优先按 URL，其次按集数）
-    // ★【修复】若 URL 匹配命中多个（综艺 SPA 同 URL），则优先取带 active 标记的那一项，
-    //   避免滚到错误集数。
+    const _epNormUrl = (u) => {
+        if(!u) return '';
+        try{
+            var a = document.createElement('a'); a.href = u;
+            return (a.pathname || '').replace(/\/+$/,'') + (a.search || '');
+        }catch(e){ return String(u).split('?')[0].split('#')[0].replace(/\/+$/,''); }
+    };
     const scrollToCurrentEp = () => {
         const rec = (typeof getSelectRecord==='function') ? getSelectRecord() : {};
-        const visPanel = Array.from(mask.querySelectorAll('.ep-line-panel')).find(p => p.style.display !== 'none') || curPanel;
+        const visPanel = Array.from(mask.querySelectorAll('.ep-line-panel')).find(p => p.style.display !== 'none' && p.offsetParent !== null) || curPanel;
         if(!visPanel) return;
+        const allItems = Array.from(visPanel.querySelectorAll('.ep-item'));
+        if(!allItems.length) return;
+        const curPagePath = _epNormUrl(location.href);
+        const recPath = rec.url ? _epNormUrl(rec.url) : '';
         let target = null;
-        if(rec.url){
-            const recUrl = rec.url.split('?')[0].split('#')[0];
-            const matches = [];
-            visPanel.querySelectorAll('.ep-item').forEach(i=>{
-                const h = (i.getAttribute('href')||'').split('?')[0].split('#')[0];
-                if(h === recUrl) matches.push(i);
-            });
-            if(matches.length === 1){
-                target = matches[0];
-            }else if(matches.length > 1){
-                target = matches.find(m => /(^|\s)(active|on|current|playing|selected)(\s|$)/.test(m.className)) || matches[0];
-            }
+        if(curPagePath){
+            const m = allItems.filter(i => _epNormUrl(i.getAttribute('href')) === curPagePath);
+            if(m.length === 1) target = m[0];
+            else if(m.length > 1) target = m.find(x => /(^|\s)(active|on|current|playing|selected)(\s|$)/.test(x.className)) || m[0];
         }
+        if(!target && recPath){
+            const m = allItems.filter(i => _epNormUrl(i.getAttribute('href')) === recPath);
+            if(m.length === 1) target = m[0];
+            else if(m.length > 1) target = m.find(x => /(^|\s)(active|on|current|playing|selected)(\s|$)/.test(x.className)) || m[0];
+        }
+        if(!target) target = visPanel.querySelector('.ep-item.active, .ep-item.on, .ep-item.current, .ep-item.playing');
+        if(!target) target = visPanel.querySelector('.ep-item.ep-selected');
+        if(!target && rec.episodeNum > 0) target = visPanel.querySelector(`.ep-item[data-num="${rec.episodeNum}"]`);
         if(!target){
-            target = visPanel.querySelector('.ep-item.active, .ep-item.on, .ep-item.current, .ep-item.playing');
-        }
-        if(!target && rec.episodeNum > 0){
-            target = visPanel.querySelector(`.ep-item[data-num="${rec.episodeNum}"]`);
+            try{
+                var um = location.href.match(/[\/-](\d+)(?:[\/-]\d+)?\.html?/) || location.href.match(/[\/-](\d+)(?:[\/?#]|$)/);
+                if(um && um[1]) target = visPanel.querySelector(`.ep-item[data-num="${um[1]}"]`);
+            }catch(e){}
         }
         if(target){
-            // ★ 使用面板内部 scrollTop 而非 scrollIntoView，避免泡泡到外层页面
             try{
-                var panelH = visPanel.clientHeight;
-                var itemTop = target.offsetTop;
-                var itemH = target.offsetHeight;
-                visPanel.scrollTo({ top: Math.max(0, itemTop - panelH/2 + itemH/2), behavior:'smooth' });
-            }catch(e){
-                target.scrollIntoView({block:'center'});
-            }
-            // 高亮提示当前集（短暂加 ep-scroll-hint 类）
+                var scroller = visPanel;
+                var p = target.parentElement;
+                while(p && p !== visPanel.parentElement && p !== mask){
+                    var oy = getComputedStyle(p).overflowY;
+                    if((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight + 4){ scroller = p; break; }
+                    p = p.parentElement;
+                }
+                var sRect = scroller.getBoundingClientRect(), tRect = target.getBoundingClientRect();
+                scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + (tRect.top - sRect.top) - sRect.height/2 + tRect.height/2), behavior:'smooth' });
+            }catch(e){ try{ target.scrollIntoView({block:'center', behavior:'smooth'}); }catch(e2){} }
             target.classList.add('ep-scroll-hint');
-            setTimeout(()=>target.classList.remove('ep-scroll-hint'), 1800);
+            clearTimeout(target._epHintTimer);
+            target._epHintTimer = setTimeout(()=>target.classList.remove('ep-scroll-hint'), 1800);
         }
     };
+    const _epScrollRetry = () => { [120, 300, 600, 1000, 1600].forEach((d) => setTimeout(()=>{ try{ scrollToCurrentEp(); }catch(e){} }, d)); };
     // ★【小优化一】顶部线路 tab 栏自动滚动到"当前正在播放的线路"按钮：
     //   我用什么路径播放，打开选集时上面那排 .ep-line-tabs 就自动把该线路的按钮滚到视野中，
     //   并短暂高亮，一眼就能看出"现在播的是这条"。
@@ -6366,7 +7003,7 @@ function buildEpisodeModal(lines){
         }, 2000);
     };
     // 弹窗渲染完成后执行滚动（等待面板/集数按钮就绪）
-    setTimeout(scrollToCurrentEp, 120);
+    _epScrollRetry();
     // ★ 渲染完成 + 线路探测徽标注入后，各执行一次定位，确保无论哪种时机都能对准当前线路
     setTimeout(scrollActiveLineTabIntoView, 120);
     setTimeout(scrollActiveLineTabIntoView, 600);
@@ -7007,6 +7644,8 @@ function buildUI() {
     overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
     transition:opacity .65s ease;
 }
+/* ★ v8优化：移除 splashBgFlow 背景流动动画（background-position 触发全屏重绘，是卡顿主因），
+   动态感由 glowPulse 光晕 + 粒子浮动共同提供，视觉体验不受影响但流畅度大幅提升 */
 /* ★ 遮住一切：动画进行中拦截所有下层点击/滚动/选中等交互，杜绝"露出的元素可被操作" */
 #hhkan-splash-mask{user-select:none;-webkit-user-select:none;touch-action:none;}
 #hhkan-splash-mask.splash-fadeout{opacity:0;pointer-events:none;}
@@ -7016,54 +7655,52 @@ html.hhkan-splash-active::-webkit-scrollbar,
 html.hhkan-splash-active *::-webkit-scrollbar{width:0;height:0;display:none;}
 .splash-bg{position:absolute;inset:0;}
 .splash-glow{
-    position:absolute;left:50%;top:50%;width:520px;height:520px;border-radius:50%;
+    position:absolute;left:50%;top:42%;width:480px;height:480px;border-radius:50%;
     transform:translate(-50%,-50%);
-    background:radial-gradient(circle,rgba(120,100,255,.35) 0%,rgba(120,100,255,0) 70%);
-    animation:glowPulse 3s ease-in-out infinite alternate;
+    background:radial-gradient(circle,rgba(102,86,255,.28) 0%,rgba(90,214,255,.12) 40%,rgba(102,86,255,0) 68%);
+    animation:glowPulse 3.2s ease-in-out infinite alternate;
+    will-change:transform;
 }
-@keyframes glowPulse{from{transform:translate(-50%,-50%) scale(.85);opacity:.7;}to{transform:translate(-50%,-50%) scale(1.15);opacity:1;}}
-.splash-stars{position:absolute;inset:0;pointer-events:none;}
-.splash-star{position:absolute;border-radius:50%;background:rgba(255,255,255,.9);box-shadow:0 0 5px rgba(255,255,255,.7),0 0 10px rgba(180,200,255,.35);}
-@keyframes starTwinkle{from{opacity:.25;transform:scale(.6);}to{opacity:1;transform:scale(1.25);}}
-.splash-meteors{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
-.splash-meteor{position:absolute;left:-160px;width:3px;height:3px;border-radius:50%;background:#fff;box-shadow:0 0 6px #fff,0 0 14px #b4d6ff;opacity:0;transform:rotate(-35deg);}
-.splash-meteor::after{content:'';position:absolute;left:2px;top:1px;width:var(--len,120px);height:2px;background:linear-gradient(90deg,rgba(255,255,255,.0) 0%,rgba(255,255,255,.85) 60%,rgba(180,210,255,.0) 100%);transform:rotate(35deg);transform-origin:left center;}
-@keyframes meteorFall{0%{opacity:0;left:-160px;}12%{opacity:1;}70%{opacity:1;}100%{opacity:0;left:120vw;}}
-.splash-balloons{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
-.splash-balloon{
-    position:absolute;bottom:-120px;border-radius:50% 50% 48% 48%/56% 56% 44% 44%;
-    opacity:0;transform:translateY(0) translateX(0);
-    animation:balloonRise 6s ease-out forwards,balloonSway 3s ease-in-out infinite alternate;
+@keyframes glowPulse{from{transform:translate(-50%,-50%) scale(.9);opacity:.6;}to{transform:translate(-50%,-50%) scale(1.1);opacity:1;}}
+/* ★ 周围装饰：浮动星光粒子 */
+/* ★ v8优化：pointer-events 改为 auto 以支持点击交互；去掉 box-shadow（渲染开销大），改用径向渐变自带发光 */
+.splash-particles{position:absolute;inset:0;overflow:hidden;pointer-events:auto;}
+.splash-particle{
+    position:absolute;border-radius:50%;
+    background:radial-gradient(circle,#fff 0%,rgba(184,181,255,.7) 50%,transparent 100%);
+    animation:particleFloat 4s ease-in-out infinite alternate;
+    cursor:pointer;
+    will-change:transform,opacity;
 }
-.splash-balloon::after{
-    content:'';position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);
-    width:1.5px;height:26px;background:rgba(255,255,255,.5);border-radius:1px;
-}
-@keyframes balloonRise{
-    0%{opacity:0;transform:translateY(0) scale(.7);}
-    12%{opacity:1;}
-    100%{opacity:.95;transform:translateY(-115vh) scale(1);}
-}
-@keyframes balloonSway{
-    from{margin-left:calc(var(--sway,30px) * -1);}
-    to{margin-left:var(--sway,30px);}
+@keyframes particleFloat{
+    0%{transform:translateY(0) translateX(0) scale(1);opacity:.2;}
+    50%{opacity:.9;}
+    100%{transform:translateY(-30px) translateX(10px) scale(1.3);opacity:.4;}
 }
 .splash-content{
     position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;
-    gap:18px;padding:24px;text-align:center;color:#fff;
+    gap:20px;padding:24px;text-align:center;color:#fff;
 }
-.splash-logo{display:flex;align-items:center;gap:12px;font-size:46px;font-weight:900;letter-spacing:4px;
-    text-shadow:0 4px 22px rgba(120,100,255,.55);}
-.splash-logo-icon{font-size:52px;animation:logoBounce 1.4s ease-in-out infinite alternate;}
-@keyframes logoBounce{from{transform:translateY(0) rotate(-4deg);}to{transform:translateY(-8px) rotate(4deg);}}
-.splash-logo-text{display:inline-block;min-width:1ch;border-right:3px solid rgba(255,255,255,.7);padding-right:4px;
-    animation:caretBlink 1s step-end infinite;}
-@keyframes caretBlink{50%{border-color:transparent;}}
-.splash-sub{font-size:16px;color:rgba(255,255,255,.82);min-height:1.4em;letter-spacing:1px;}
-.splash-url{font-size:13px;color:rgba(255,255,255,.55);letter-spacing:1px;font-family:ui-monospace,Menlo,Consolas,monospace;}
-.splash-progress{width:300px;max-width:80vw;height:6px;background:rgba(255,255,255,.14);border-radius:4px;overflow:hidden;}
-.splash-progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#7f5cff,#5ad6ff);border-radius:4px;transition:width .25s ease;}
-.splash-tip{font-size:13px;color:rgba(255,255,255,.6);min-height:1.3em;transition:opacity .3s;}
+.splash-logo{display:flex;align-items:center;gap:16px;}
+.splash-logo-icon{
+    width:72px;height:72px;border-radius:18px;object-fit:cover;
+    box-shadow:0 8px 32px rgba(102,86,255,.4), 0 0 0 1px rgba(255,255,255,.08);
+    animation:logoFloat 2.4s ease-in-out infinite alternate;
+}
+@keyframes logoFloat{
+    from{transform:translateY(0) scale(1);}
+    to{transform:translateY(-6px) scale(1.03);}
+}
+.splash-logo-text{
+    font-size:42px;font-weight:800;letter-spacing:6px;
+    background:linear-gradient(135deg,#ffffff 0%,#b8b5ff 100%);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    min-width:1ch;
+}
+.splash-sub{font-size:15px;color:rgba(255,255,255,.65);min-height:1.4em;letter-spacing:2px;font-weight:300;}
+.splash-progress{width:260px;max-width:70vw;height:3px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;}
+.splash-progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#6656ff,#5ad6ff);border-radius:2px;transition:width .3s ease;box-shadow:0 0 12px rgba(102,86,255,.5);}
+.splash-tip{font-size:12px;color:rgba(255,255,255,.45);min-height:1.3em;letter-spacing:1px;}
 /* ========== 顶部栏 ========== */
 #pake-window-top-bar{
     position:fixed;
@@ -8057,11 +8694,9 @@ video.hhkan-pause-after{
 #local-player-mask{
     position:fixed;
     inset:0;
-    background:rgba(0,0,0,0.85);
+    background:#0a0a0a;
     z-index:2147483647;
-    display:flex;
-    align-items:center;
-    justify-content:center;
+    overscroll-behavior:contain;
     animation: lpMaskFadeIn 0.3s ease forwards;
 }
 @keyframes lpMaskFadeIn{
@@ -8069,14 +8704,13 @@ video.hhkan-pause-after{
     to  { opacity:1; }
 }
 #local-player-box{
-    width:96vw;
-    height:94vh;
+    width:100vw;
+    height:100vh;
     background:#0a0a0a;
-    border-radius:12px;
+    border-radius:0;
     overflow:hidden;
     display:flex;
     flex-direction:column;
-    box-shadow:0 16px 64px rgba(0,0,0,0.6);
     animation: lpBoxSlideDown 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 @keyframes lpBoxSlideDown{
@@ -8962,6 +9596,7 @@ video.hhkan-pause-after{
     inset:0;
     background:#ffffff;
     z-index:2147483647;
+    overscroll-behavior:contain;
     animation: recMaskFadeIn 0.35s ease forwards;
 }
 @keyframes recMaskFadeIn{
@@ -9003,6 +9638,18 @@ video.hhkan-pause-after{
     padding:8px 12px;
 }
 .rec-meta-bar #rec-today{ font-weight:600; color:#222; }
+.rec-poem{
+    font-size:12px;
+    color:#888;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width:400px;
+    display:inline-block;
+    vertical-align:middle;
+}
+.rec-poem em{ font-style:italic; color:#8b5cf6; }
+.rec-poem span{ color:#aaa; font-size:11px; }
 .rec-meta-bar #rec-countdown{
     display:inline-block;
     min-width:92px;
@@ -9637,7 +10284,7 @@ async function openRecommendModal(){
             <div id="recommend-modal-box">
                 <h4>🎬 每日影视推荐｜点击片名或封面即可搜索本站资源</h4>
                 <div class="rec-meta-bar" style="font-size:12px;color:#888;margin-bottom:14px;line-height:1.7;">
-                    📅 今日日期：<span id="rec-today"></span>　|　🕛 下次自动换片倒计时：<span id="rec-countdown">--:--:--</span>
+                    📅 今日日期：<span id="rec-today"></span>　|　🕛 下次自动换片倒计时：<span id="rec-countdown">--:--:--</span>　|　<span id="rec-poem" class="rec-poem"></span>
                 </div>
                 <div class="rec-wrap">
                     <div class="rec-loading">
@@ -9660,6 +10307,8 @@ async function openRecommendModal(){
         ball.classList.add('fb-hidden-by-modal');
         ball.style.display = 'none';
     }
+    // ★ 锁 body 滚动，阻止浏览器原生下拉栏
+    document.body.style.overflow = 'hidden';
     const boxEl = mask.querySelector('#recommend-modal-box');
     boxEl.addEventListener('click',e=>e.stopPropagation());
     mask.querySelector('#rec-close-btn').onclick = (e)=>{
@@ -9725,7 +10374,7 @@ function renderRecommendContent(mask, recData){
             <span>🎬 每日影视推荐｜点击片名或封面即可搜索本站资源</span>
         </h4>
         <div class="rec-meta-bar" style="font-size:12px;color:#888;margin-bottom:14px;line-height:1.7;">
-            📅 今日日期：<span id="rec-today"></span>　|　🕛 下次自动换片倒计时：<span id="rec-countdown">--:--:--</span>
+            📅 今日日期：<span id="rec-today"></span>　|　🕛 下次自动换片倒计时：<span id="rec-countdown">--:--:--</span>　|　<span id="rec-poem" class="rec-poem"></span>
         </div>
         <div class="rec-wrap">`;
     function escAttr(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -9848,6 +10497,8 @@ function openLocalPlayerModal(){
     const fsEl = getFullscreenElement();
     if(fsEl) fsEl.appendChild(mask);
     else document.body.appendChild(mask);
+    // ★ 锁 body 滚动，阻止浏览器原生下拉栏
+    document.body.style.overflow = 'hidden';
     // 隐藏悬浮球
     const ball = document.querySelector('#hhkan-float-ball');
     if(ball){
@@ -9856,19 +10507,27 @@ function openLocalPlayerModal(){
     }
     const boxEl = mask.querySelector('#local-player-box');
     boxEl.addEventListener('click', e => e.stopPropagation());
+    // ★ 恢复上次关闭前保留的播放列表
+    if(localPlayerState.files && localPlayerState.files.length > 0){
+        renderPlaylist(mask);
+        updateTitle(mask);
+        // 如果上次有正在播放的视频，恢复播放
+        if(localPlayerState.currentIndex >= 0 && localPlayerState.currentIndex < localPlayerState.files.length){
+            // 延迟一帧等 DOM 就绪
+            setTimeout(()=>{ playLocalVideo(mask, localPlayerState.currentIndex); }, 50);
+        }
+    }
     // 关闭
     const closeModal = () => {
-        // 停止并释放视频 URL
+        // ★ 关闭窗口：仅暂停视频，保留 files 列表和 blob URL（下次打开恢复）
+        //   只有关闭浏览器/刷新页面才会自动清除内存中的 File 对象和 blob URL
         const video = mask.querySelector('#lp-video');
         if(video){
             video.pause();
-            if(video.src && video.src.startsWith('blob:')){
-                URL.revokeObjectURL(video.src);
-            }
+            // 不 revokeObjectURL：保留 blob URL 供下次打开继续播放
         }
-        localPlayerState.files = [];
-        localPlayerState.currentIndex = -1;
         mask.remove();
+        document.body.style.overflow = '';
         // 恢复悬浮球
         if(ball){
             ball.classList.remove('fb-hidden-by-modal');
@@ -10614,6 +11273,7 @@ function openPlayerSettingModal(fromLeft){
     const saVal = mask.querySelector('#saturation-val');
     const coVal = mask.querySelector('#contrast-val');
     const filterPanel = mask.querySelector('#ps-tab-filter');
+
     // ★ 当前生效的画面调节值（滑块 / 预设点击 都是往这里写，预览与保存统一从这里读）
     const _curFilter = { b: setting.brightness, s: setting.saturation, c: setting.contrast };
     const clampPctVal = v => Math.max(0, Math.min(200, parseInt(v,10)||0));
@@ -11055,9 +11715,37 @@ function openPlayerSettingModal(fromLeft){
 }
 // TAURI窗口置顶
 let isTopMost = false;
+// ★ v15.3：精美 toast 弹窗（置顶操作专用，不依赖外部函数）
+function _topmostToast(icon, title, desc) {
+    var old = document.getElementById('hhk-topmost-toast');
+    if (old) old.remove();
+    var wrap = document.createElement('div');
+    wrap.id = 'hhk-topmost-toast';
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;pointer-events:none;'
+        + 'opacity:0;transition:opacity .25s ease;';
+    wrap.innerHTML = '<div style="background:rgba(20,22,30,.92);backdrop-filter:blur(12px);color:#fff;border-radius:16px;'
+        + 'padding:28px 44px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);'
+        + 'transform:scale(.9);transition:transform .25s ease;max-width:80vw;">'
+        + '<div style="font-size:42px;margin-bottom:10px;filter:drop-shadow(0 4px 12px rgba(0,0,0,.3))">' + icon + '</div>'
+        + '<div style="font-size:16px;font-weight:bold;margin-bottom:6px;letter-spacing:.5px">' + title + '</div>'
+        + '<div style="font-size:12px;color:rgba(255,255,255,.6);">' + desc + '</div>'
+        + '</div>';
+    document.body.appendChild(wrap);
+    requestAnimationFrame(function(){
+        wrap.style.opacity = '1';
+        var box = wrap.firstChild;
+        if (box) box.style.transform = 'scale(1)';
+    });
+    setTimeout(function(){
+        wrap.style.opacity = '0';
+        var box = wrap.firstChild;
+        if (box) box.style.transform = 'scale(.9)';
+        setTimeout(function(){ wrap.remove(); }, 300);
+    }, 1800);
+}
 async function toggleTopMost(btn){
     if(!window.__TAURI__){
-        alert("仅打包后的Pake软件可使用置顶功能，预览模式无效");
+        _topmostToast('⚠️', '预览模式不可用', '仅打包后的 Pake 客户端支持置顶功能');
         return;
     }
     try{
@@ -11067,13 +11755,15 @@ async function toggleTopMost(btn){
         if(isTopMost){
             btn.textContent = "📌 取消置顶";
             btn.classList.add("top-active");
+            _topmostToast('📌', '窗口已置顶', '始终显示在最前面');
         }else{
             btn.textContent = "📌 置顶窗口";
             btn.classList.remove("top-active");
+            _topmostToast('✅', '已取消置顶', '窗口恢复正常层级');
         }
     }catch(e){
         console.error(e);
-        alert("设置置顶失败："+e.message);
+        _topmostToast('❌', '设置失败', e.message || '未知错误');
     }
 }
 // 修正fixed元素被顶部栏遮挡
@@ -11324,7 +12014,7 @@ document.addEventListener("fullscreenchange",()=>{
 // ==================== ★ 更新公告（原「使用声明」改造）========================
 // 版本号：升级版本号后，已读过旧版本的用户下次会自动再次弹出公告
 const UPDATE_NOTICE = {
-    version: "v0.0.7",
+    version: "v0.0.8",
     title: "更新公告",
     subTitle: "🎉完整功能清单 · 全部功能一览",
     changes: [
@@ -11423,6 +12113,13 @@ function checkShowUpdateNoticeOnBoot(){
     if(sessionStorage.getItem("pake_session_ok") === "yes") return;   // 本会话已确认 → 不再弹
     if(!shouldShowUpdateNotice()) return;                              // 已读过同版本 → 不再弹
     if(document.querySelector("#pake-disclaimer-mask")) return;        // 已存在 → 不重复
+    // ★ 问题一修复：打开更新公告前，先关闭其他所有弹窗
+    if (typeof requestOpenModal === 'function') {
+        if (!requestOpenModal('pake-disclaimer-mask')) return;
+    } else {
+        // 兜底：手动关闭所有已知弹窗
+        document.querySelectorAll('#hhkan-continue-mask, #hhk-fav-mask, #hhkan-enhance-settings, #episode-modal-mask, #player-setting-mask, #recommend-modal-mask').forEach(function(el){ el.remove(); });
+    }
     const maskDom = document.createElement('div');
     maskDom.id = "pake-disclaimer-mask";
     buildUpdateNotice(maskDom);
@@ -15678,8 +16375,10 @@ setTimeout(()=>{
             //   - blur     ：普通高斯模糊，效果直接，性能开销中等
             //   - acrylic  ：强模糊 + 低饱和 + 微噪点，模拟 Windows 11 亚克力
             //   - mica     ：弱模糊 + 亮度提升 + 暖调，模拟 Windows 11 云母（推荐）
-            //   ★ v0.0.7：默认「亚克力模糊」，打开全局设置即呈现毛玻璃观感
-            decoration: 'frosted',
+            //   ★ v0.0.8：默认「亚克力模糊」，打开全局设置即呈现毛玻璃观感
+            decoration: 'off',
+            // ★ v7.2：自动跳过贴片广告（学习型：第一次看完正片后记录广告时长，下次自动跳过）
+            skipAds: true,
         };
         try {
             // ★ forceDefault=true（如"恢复默认"）时跳过读取缓存，直接返回内置默认值，
@@ -15766,31 +16465,98 @@ setTimeout(()=>{
     function detectTotalEpisodes() {
         let total = 0, kind = 'movie', detectedFrom = '';
         // ★ 真实站点选集框（.episode-list > .episode-item，无 href 也能识别）
-        let es = { maxItems: 0, labels: [] };
+        let es = { maxItems: 0, labels: [], jiNums: [], huaNums: [] };
         try { es = hhkanEpisodeStructure(); } catch (e) { }
-        try { // 兜底：页面文本「共N集/期」（站点渲染，最权威）
-            const txt = document.title + ' ' + (document.body ? document.body.innerText.slice(0, 3000) : '');
-            const m = txt.match(/共\s*(\d+)\s*(?:集|期)/);
-            if (m) { total = parseInt(m[1]) || 0; detectedFrom = 'pageText'; }
-        } catch (e) { }
-        // 真实选集框：单条线路最大项数（电影每线仅1个画质项；综艺/剧集多项）
-        if (total <= 0 && es.maxItems > 0) { total = es.maxItems; detectedFrom = 'episodeList'; }
+
+        // ============================================================
+        // ★ 修复：集数只认「线路集数最多的那条」，分两步算权威值：
+        //   A) extractAllLines() 真实线路结构 → maxLine（最权威）
+        //   B) 全页 <a> 链接扫同影片ID的最大集号 → maxScan（部分线路AJAX未渲染时的补充）
+        //   只要 A 或 B 抓到了集数，就以它为准，不再被整页文本污染值覆盖。
+        // ============================================================
+        let maxLine = 0;
         try {
-            if (total <= 0 && typeof extractAllLines === 'function') {
+            if (typeof extractAllLines === 'function') {
                 const _lines = extractAllLines();
-                let max = 0;
                 (_lines || []).forEach(l => {
                     const subs = (l && l.isGroup && l.subLines && l.subLines.length) ? l.subLines : [l];
                     subs.forEach(sl => {
                         const n = sl && (typeof sl.total==='number' ? sl.total : (sl.episodes||[]).length);
-                        const con = maxConsecutiveEpisode(sl && sl.episodes) || n;
-                        if (con > max) max = con;
-                        if (n > max) max = n;
+                        if (n > maxLine) maxLine = n;
+                        (sl && sl.episodes || []).forEach(ep => {
+                            const en = parseInt(ep && ep.num) || 0;
+                            if (en > 0 && en < 9000 && en > maxLine) maxLine = en;
+                        });
                     });
                 });
-                if (max > 0) { total = max; detectedFrom = 'extractAllLines'; }
             }
         } catch (e) { }
+        if (maxLine >= 2000) maxLine = 0; // ★ v15.2 修复：上限从200提高到2000，适配短剧/长篇动漫高集数
+
+        // B) 全页 <a> 链接扫描——只统计 URL 含同一影片ID 的链接，取最大集数编号
+        let maxScan = 0;
+        try {
+            var pageUrl = location.href;
+            var vidMatch = pageUrl.match(/(?:detail|play|movie|voddetail|vod)\/(\d+)/) || pageUrl.match(/id\/(\d+)/);
+            var vid = vidMatch ? vidMatch[1] : '';
+            document.querySelectorAll('a[href]').forEach(function(a){
+                var href = a.href || '';
+                var text = (a.textContent||'').trim();
+                if(vid && href.indexOf(vid) < 0) return;
+                var mUrl = href.match(/(?:play|detail|vod)[\/\w-]*?[-\/](\d+)\.html/) || href.match(/\/(\d+)\.html/);
+                var mText = text.match(/第?\s*(\d+)\s*(?:集|话|期|话)/) || text.match(/EP\s*(\d+)/i);
+                var n = 0;
+                if(mText) n = parseInt(mText[1])||0;
+                else if(mUrl && vid && href.indexOf(vid)>=0) n = parseInt(mUrl[1])||0;
+                if(vid && n == parseInt(vid)) n = 0;
+                if(n > 0 && n < 2000 && n > maxScan) maxScan = n; // ★ v15.2：上限从200提高到2000，适配短剧
+            });
+        } catch(e) { }
+
+        // ★ 权威判定：线路(maxLine) > 同影片链接扫描(maxScan) > 页面文本兜底
+        if (maxLine > 0) {
+            total = maxLine; detectedFrom = 'allLinesMax';
+        } else if (maxScan > 0) {
+            total = maxScan; detectedFrom = 'fullScan';
+        }
+
+        // ★ 兜底·仅当线路完全抓不到时，才用页面文本/选集标签/列表数
+        if (total === 0) {
+            try { // 兜底：全页面文本「共N集/期/全N集/更新至N集」
+                const txt = document.title + ' ' + (document.body ? document.body.innerText : '');
+                const patterns = [
+                    /共\s*(\d+)\s*(?:集|期)/,
+                    /全\s*(\d+)\s*(?:集|期)/,
+                    /更新至\s*第?\s*(\d+)\s*(?:集|期)/,
+                    /已更新?\s*第?\s*(\d+)\s*(?:集|期)/,
+                    /更新第?\s*(\d+)\s*(?:集|期)/,
+                    /第\s*(\d+)\s*(?:集|期)\s*已完结/,
+                    /HD中字更新至\s*第?\s*(\d+)\s*(?:集|期)/,
+                    /完结\/全\s*(\d+)\s*(?:集|期)/
+                ];
+                patterns.forEach(function(p){
+                    const m = txt.match(p);
+                    if(m){
+                        const n = parseInt(m[1])||0;
+                        if(n > total) { total = n; detectedFrom = 'pageText'; }
+                    }
+                });
+            } catch (e) { }
+            // ★ 从选集项文本中提取最大集数编号
+            if (es.labels && es.labels.length) {
+                var maxLabelEp = 0;
+                es.labels.forEach(function(lb){
+                    var m = lb.match(/第?\s*(\d+)\s*(?:集|话)/);
+                    if(m){ var n = parseInt(m[1])||0; if(n>maxLabelEp) maxLabelEp = n; }
+                });
+                if(es.jiNums && es.jiNums.length){
+                    es.jiNums.forEach(function(n){ if(n>maxLabelEp) maxLabelEp=n; });
+                }
+                if(maxLabelEp > total) { total = maxLabelEp; detectedFrom = 'labelMaxNum'; }
+            }
+            // 选集框最大项数（仅前面都没数到时才用）
+            if (es.maxItems > 0 && total === 0 && es.maxItems < 2000) { total = es.maxItems; detectedFrom = 'episodeList'; } // ★ v15.2：上限从200提高到2000
+        }
         // ★ 五类形态：统一以 hhkanContentType（频道路由 + .detail-tags 标签 + 选集结构）为准
         const _cType = (typeof hhkanContentType==='function') ? hhkanContentType() : '';
         if (_cType === 'movie' || _cType === 'series' || _cType === 'anime' || _cType === 'variety' || _cType === 'short') {
@@ -15818,8 +16584,21 @@ setTimeout(()=>{
         const epNum = hhkanSanitizeEpNum(h.ep);
         let total = parseInt(h.total) || 0;
         let kind = h.kind || 'movie';
+        // ★ v15.1 修复：高集数（≥80集）的 series 记录，且标题不含动漫关键词 → 大概率是短剧
+        //   （这个站的短剧详情页URL是 /detail/数字.html，跟普通连续剧格式一样，URL无特征）
+        if (kind === 'series' && total >= 80 && !/动画|动漫|番剧|卡通|国漫|日漫|OVA|剧场版/.test(h.title||'')) {
+            kind = 'short';
+        }
+        // ★ v15 修复：URL 路径含短剧特征的旧记录，此前被误判为连续剧，自动纠正为短剧
+        if (kind === 'series' && /\/short|duanju|\/dj\/|\/mini\//.test((h.url || '').toLowerCase())) {
+            kind = 'short';
+        }
         if (kind === 'series' && total === 1) kind = 'movie';
         if (kind === 'series' && total <= 0 && epNum === 0) kind = 'movie';
+        // ★ v7.1 修复：单集记录但 epNum 异常大（如站方把电影正片标为"第1集"后被误读为多集），
+        //   且标题不含任何剧集特征词时，强制改回电影（解决"功夫女足"类电影显示为连续剧的问题）
+        if (kind === 'series' && total <= 1) kind = 'movie';
+        if (kind === 'series' && (epNum <= 1 || !epNum) && total <= 2 && !/剧|季|番|辑|连载/.test(h.title||'')) kind = 'movie';
         const unit = h.unit || ((kind === 'variety') ? '期' : '集');
         const isEpisodeKind = (kind === 'variety') || HHKAN_EPISODE_KINDS.includes(kind);
         const kindLabel = HHKAN_KIND_LABEL[kind] || '影视';
@@ -15948,12 +16727,25 @@ setTimeout(()=>{
         //     （如详情页临时缺选集列表）；
         //   - 历史已确认为电影 → 本次只有在出现明确的非电影信号(综艺/动漫/短剧)时
         //     才允许改写，否则强制保持电影（选集列表多为清晰度/线路切换）。
+        //   ★ v7.1 修复：如果当前页面【明确】检测为电影（_contentNow==='movie'，
+        //     即有"片"类标签+无第2集等硬证据，不是空兜底），允许从旧误判的 series
+        //     纠正回 movie——否则像"功夫女足"这种被误判后永远锁死在连续剧分类里。
         const _contentNow = ((typeof hhkanContentType === 'function') ? hhkanContentType() : '') ;
         const SERIES_KINDS = ['series', 'anime', 'short'];
         if (SERIES_KINDS.includes(prevKind) && kind === 'movie' && total <= 1 && prevTotal > 1) {
-            kind = prevKind; total = prevTotal; unit = '集';
+            // ★ v7.1：当前页面有明确的电影证据 → 信任新判断，纠正旧误判
+            if (_contentNow === 'movie') {
+                kind = 'movie'; total = 1; epField = 0; unit = '集';
+            } else {
+                kind = prevKind; total = prevTotal; unit = '集';
+            }
         } else if (prevKind === 'variety' && kind === 'movie') {
-            kind = 'variety'; total = prevTotal || total; unit = '期';
+            // ★ v7.1：同理，当前明确是电影标签时允许纠正
+            if (_contentNow === 'movie') {
+                kind = 'movie'; total = 1; epField = 0; unit = '集';
+            } else {
+                kind = 'variety'; total = prevTotal || total; unit = '期';
+            }
         } else if (prevKind === 'movie' && kind !== 'movie' && _contentNow === '') {
             kind = 'movie'; total = 1; epField = 0; unit = '集';
         }
@@ -16185,6 +16977,8 @@ setTimeout(()=>{
     // ---------- 绑定视频 ----------
     function bindVideo(video) {
         if (video._hhkanBound) return;
+        // ★ 本地播放器的 video 不参与站点进度记录/集数检测
+        if (video.closest && video.closest('#local-player-mask')) return;
         video._hhkanBound = true;
         video._hhkanNextFired = false;
         video.addEventListener('timeupdate', () => { onTimeUpdate(video); recordProgress(video); });
@@ -16200,7 +16994,7 @@ setTimeout(()=>{
     }
     function watchForVideo() {
         const v = document.querySelector('video');
-        if (v) bindVideo(v);
+        if (v && !(v.closest && v.closest('#local-player-mask'))) bindVideo(v);
     }
 
     // ---------- 设置弹窗（UI 名称：全局设置）----------
@@ -16213,7 +17007,7 @@ setTimeout(()=>{
         mask.innerHTML = `
         <div class="hes-box">
             <div class="hes-head"><span>⚙ 全局设置</span><button class="hes-close" type="button" aria-label="关闭">×</button></div>
-            <!-- ★【v0.2.0】设置 / 装饰 双选项卡 -->
+            <!-- ★【v0.2.0】设置 / 装饰 / 组件 三选项卡 -->
             <div class="hes-tabs" id="hes-tabs">
                 <div class="hes-tab hes-tab-active" data-hes-tab="setting">⚙ 设置</div>
                 <div class="hes-tab" data-hes-tab="decoration">🎨 装饰</div>
@@ -16228,6 +17022,14 @@ setTimeout(()=>{
                     <label class="hes-row hes-check"><span><i class="hes-icon">⚡</i>网页加速（更快加载画面）</span>
                         <input type="checkbox" data-k="webAccelerate" ${SET.webAccelerate !== false ? 'checked' : ''}>
                     </label>
+                    <div class="hes-divider"></div>
+                    <label class="hes-row hes-check"><span><i class="hes-icon">🚫</i>自动跳过贴片广告（学习型）</span>
+                        <input type="checkbox" data-k="skipAds" ${SET.skipAds !== false ? 'checked' : ''}>
+                    </label>
+                    <div class="hes-tip" style="margin:4px 0 0 0;">
+                        <span class="hes-tip-icon">💡</span>
+                        <span class="hes-tip-text">首次播放某片时自动记录广告时长，之后再看自动跳过；也会在检测到广告时显示"跳过广告"按钮</span>
+                    </div>
                     <div class="hes-divider"></div>
                     <label class="hes-row hes-check"><span><i class="hes-icon">⏭️</i>片尾到点自动播放下一集</span>
                         <input type="checkbox" data-k="autoNext" ${SET.autoNext ? 'checked' : ''}>
@@ -16295,7 +17097,6 @@ setTimeout(()=>{
                     </div>
                     <div class="hes-divider"></div>
                 </div>
-            </div>
             <div class="hes-foot">
                 <button type="button" class="hes-save">💾 保存</button>
                 <button type="button" class="hes-reset">↺ 恢复默认</button>
@@ -16330,7 +17131,7 @@ setTimeout(()=>{
             seekInput.addEventListener('blur', () => seekTip.classList.remove('hes-tip-show'));
         }
 
-        // ---------- ★【v0.2.0】设置 / 装饰 选项卡切换 ----------
+        // ---------- ★【v0.2.0】设置 / 装饰 / 组件 选项卡切换 ----------
         const tabs = mask.querySelectorAll('.hes-tab');
         const panelSetting = mask.querySelector('#hes-panel-setting');
         const panelDeco    = mask.querySelector('#hs-panel-decoration');
@@ -16371,6 +17172,7 @@ setTimeout(()=>{
         const _settingNameMap = {
             autoFullscreen: '影片自动放大全屏播放',
             webAccelerate: '网页加速',
+            skipAds: '自动跳过贴片广告',
             autoNext: '片尾自动播放下一集',
             keysEnabled: '全局快捷键'
         };
@@ -16397,7 +17199,8 @@ setTimeout(()=>{
             // ★【v0.2.0】把装饰设置落到 DOM（即时生效，无需刷新）
             if (typeof applyDecoration === 'function') applyDecoration(SET.decoration);
 
-            const switchLines = ['autoFullscreen', 'webAccelerate', 'autoNext', 'keysEnabled'].map(k => {
+            // ★ 组件：刷新时间显示
+            const switchLines = ['autoFullscreen', 'webAccelerate', 'skipAds', 'autoNext', 'keysEnabled'].map(k => {
                 const name = _settingNameMap[k] || k;
                 return `<b>${name}</b>：${!!SET[k] ? '✅ 已开启' : '⏹ 已关闭'}`;
             });
@@ -16453,7 +17256,13 @@ setTimeout(()=>{
     // ---------- 继续观看弹窗（支持单条删除 + 清空全部）----------
     function openContinueWatch() {
         if (document.querySelector('#hhkan-continue-mask')) return;
-        if (!requestOpenModal('hhkan-continue-mask')) return;
+        // ★ 问题一修复：打开继续观看前，强制关闭所有其他弹窗
+        if (typeof requestOpenModal === 'function') {
+            if (!requestOpenModal('hhkan-continue-mask')) return;
+        } else {
+            // 兜底：手动关闭所有已知弹窗
+            document.querySelectorAll('#hhk-fav-mask, #hhkan-enhance-settings, #episode-modal-mask, #player-setting-mask, #recommend-modal-mask').forEach(function(el){ el.remove(); });
+        }
         // ★ 折叠阈值：≤ 该数量时直接全部展示，不显示「展开」按钮；> 该数量时收起只显前 N 条
         const FOLD_THRESHOLD = 6;
         // ★ 读取上一次展开状态（模块级，避免 render 被封面刷新/导入重入时丢失展开态）
@@ -16538,6 +17347,13 @@ setTimeout(()=>{
                 // ★ 五类类型标签（电影 / 动漫 / 连续剧 / 综艺 / 短剧），带年份后缀
                 const yearStr = h.year ? ` · ${h.year}` : '';
                 const typeTag = `<span class="hc-type-tag">${n.kindLabel}${yearStr}</span>`;
+                // ★ v15.2：标题长时自动缩小字体，让全部标题都能显示出来（不再省略号截断）
+                const titleLen = (h.title || '').length;
+                const titleFontSize = titleLen <= 18 ? '14px'
+                    : titleLen <= 26 ? '12.5px'
+                    : titleLen <= 34 ? '11.5px'
+                    : titleLen <= 44 ? '10.5px'
+                    : '10px';
                 // ★ 海报缩略图（五类通用，有则显示；裂图自动隐藏）
                 const posterHtml = h.poster
                     ? `<div class="hc-poster"><img src="${h.poster}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'"></div>`
@@ -16548,13 +17364,13 @@ setTimeout(()=>{
                 if (timePart) metaArr.push(timePart);
                 const metaText = metaArr.length ? metaArr.join(' · ')
                     : ((statusBadge || seriesFinishBadge) ? '' : ('看到 ' + pct + '%'));
-                return `<div class="hc-item" data-key="${h.key}" data-kind="${kind}">
+                return `<div class="hc-item" data-key="${h.key}" data-kind="${kind}" data-url="${h.url}">
                     ${posterHtml}
-                    <a class="hc-item-main" href="${h.url}" title="${h.title}">
-                        <div class="hc-title hc-title-${titleState}">${typeTag}${h.title}${updateBadge}${seriesFinishBadge}${statusBadge}</div>
+                    <div class="hc-item-main" title="${h.title}">
+                        <div class="hc-title hc-title-${titleState}" style="font-size:${titleFontSize}">${typeTag}${h.title}${updateBadge}${seriesFinishBadge}${statusBadge}</div>
                         <div class="hc-meta">${metaText}</div>
                         <div class="hc-bar"><i style="width:${pct}%"></i></div>
-                    </a>
+                    </div>
                     <button type="button" class="hc-del" data-key="${h.key}" title="删除该影片记录">删除</button>
                 </div>`;
             }).join('');
@@ -16603,6 +17419,20 @@ setTimeout(()=>{
                     if (window.showFloatTip) window.showFloatTip('已删除该影片记录');
                 };
             });
+            // ★ 问题一修复：点击条目跳转时自动用当前域名，不跳转到原网址
+            list.querySelectorAll('.hc-item').forEach(item => {
+                item.querySelector('.hc-item-main').onclick = (ev) => {
+                    ev.preventDefault();
+                    const url = item.dataset.url;
+                    if (!url) return;
+                    try {
+                        const u = new URL(url, location.origin);
+                        location.href = location.origin + u.pathname + u.search;
+                    } catch (err) {
+                        location.href = url;
+                    }
+                };
+            });
         };
         const mask = document.createElement('div');
         mask.id = 'hhkan-continue-mask';
@@ -16645,7 +17475,7 @@ setTimeout(()=>{
             }
             const data = {
                 app: '好好看',
-                version: 'v0.0.7',
+                version: 'v0.0.8',
                 exportAt: Date.now(),
                 count: hist.length,
                 history: hist
@@ -16897,14 +17727,10 @@ setTimeout(()=>{
     function fetchDetailTotalEps(id) {
         return new Promise(function (resolve) {
             if (!id) { resolve(0); return; }
-            var hosts = (typeof detailHostQueue === 'function') ? detailHostQueue() : [hhkanHost()];
+            // v12 只抓【当前网址】同域详情页，不跨镜像
+            var base = (location.origin || '').replace(/\/+$/, '');
             var paths = (typeof detailPathQueue === 'function') ? detailPathQueue(id) : ['/movie/' + encodeURIComponent(id) + '.html'];
-            var queue = [];
-            hosts.forEach(function (h) {
-                var base = String(h || '').replace(/\/+$/, '');
-                if (!base) return;
-                paths.forEach(function (p) { queue.push(base + p); });
-            });
+            var queue = paths.map(function (p) { return base + p; });
             var qi = 0, done = false;
             function tryOne() {
                 if (done) return;
@@ -16917,45 +17743,11 @@ setTimeout(()=>{
                     xhr.onload = function () {
                         if (xhr.status !== 200) { tryOne(); return; }
                         var html = xhr.responseText || '';
-                        var total = 0;
-                        // ① 站点渲染的「共N集 / 共N期」（最权威）
-                        var m = html.match(/共\s*(\d+)\s*(?:集|期)/);
-                        if (m) total = parseInt(m[1]) || 0;
-                        // ② JSON-LD numberOfEpisodes
-                        if (total <= 0) {
-                            var ldMatch = html.match(/"numberOfEpisodes"\s*:\s*"?(\d+)/i);
-                            if (ldMatch) total = parseInt(ldMatch[1]) || 0;
-                        }
-                        // ③ og:type + 播放链接计数
-                        if (total <= 0) {
-                            var ogType = html.match(/<meta\s+property="og:type"\s+content="([^"]+)"/i);
-                            if (ogType && /tv|series|show/i.test(ogType[1])) {
-                                var cntAll = (html.match(/\/(?:play|movie)\/(?:\d+[\/-])*\d+[^"']*/gi) || []).length;
-                                if (cntAll > 1) total = cntAll;
-                            }
-                        }
-                        // ④ 选集链接去重计数
-                        if (total <= 0) {
-                            var cnt = 0, seen = {};
-                            var re = /href="([^"]*\/(?:play|movie)\/(?:\d+[\/-])*\d+[^"]*)"/gi, mm;
-                            while ((mm = re.exec(html)) !== null) { if (!seen[mm[1]]) { seen[mm[1]] = 1; cnt++; } }
-                            total = cnt;
-                        }
-                        // ⑤ 「第N集 / 第N期」最大编号
-                        if (total <= 0) {
-                            var maxN = 0;
-                            (html.match(/第\s*\d+\s*(?:集|期)/gi) || []).forEach(function (t) {
-                                var n = parseInt((t.match(/\d+/) || [])[0]) || 0;
-                                if (n > maxN) maxN = n;
-                            });
-                            total = maxN;
-                        }
-                        // ⑥ 选集容器里的 <a> 计数
-                        if (total <= 0) {
-                            var listMatches = html.match(/<a[^>]+href="[^"]*"[^>]*>.*?第\s*\d+\s*(?:集|期)/gi) || [];
-                            if (listMatches.length > 1) total = listMatches.length;
-                        }
-                        // ⑦ 顺手补全海报（og:image → ID 权威键）
+                        // v12 统一调用共享解析函数（按线路取集数最多的那条）
+                        var total = (typeof window.__hhkanParseTotalEpsFromHtml === 'function')
+                            ? window.__hhkanParseTotalEpsFromHtml(html)
+                            : 0;
+                        // 顺手补全海报（og:image → ID 权威键）
                         try {
                             var ogImg = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
                             if (ogImg && ogImg[1] && typeof setPosterById === 'function') {
@@ -16998,11 +17790,11 @@ setTimeout(()=>{
                 var EPISODE_LIKE = ['series','anime','short','variety'];
                 if (EPISODE_LIKE.indexOf(kind) !== -1) {
                     // ★ 连续剧 / 动漫 / 短剧 / 综艺：比对集数（期数）变化
-                    if (latest > prevTotal) {
+                    // v13：只有 latest>1 且 > 旧 total 时才更新
+                    //   latest<=1 表示没抓准，不降级 total
+                    if (latest > 1 && latest > prevTotal) {
                         next = Object.assign({}, h, { total: latest, prevTotal: prevTotal, lastCheckedAt: Date.now() });
                     } else {
-                        // ★ 无更新也刷新「最近核对时间」，让 TTL 节流生效（6h 内不重复抓取）；
-                        //   prevTotal 缺失时顺手补上
                         var _patch = { lastCheckedAt: Date.now() };
                         if (prevTotal === 0 && parseInt(h.total) > 0) _patch.prevTotal = parseInt(h.total) || 0;
                         next = Object.assign({}, h, _patch);
@@ -17248,63 +18040,39 @@ setTimeout(()=>{
         .hc-fold-toggle.is-open .hc-fold-hint{display:none;}
         @keyframes hesIn{from{opacity:0;transform:translateY(-30px) scale(.97);}to{opacity:1;transform:none;}}
         .hes-head,.hc-head{display:flex;align-items:center;justify-content:space-between;font-size:16px;font-weight:bold;margin-bottom:12px;gap:8px;}
-        .hes-close,.hc-close{background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#888;}
-        .hc-clearall{background:#fff0f0;color:#d33;border:1px solid #f5c6cb;border-radius:6px;font-size:12px;padding:4px 10px;cursor:pointer;}
-        .hc-clearall:hover{background:#ffe3e3;}
+        .hes-close,.hc-close{background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#888;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;transition:all .2s ease;}
+        .hc-close:hover{background:rgba(229,57,53,.12);color:#e53935;transform:rotate(90deg);}
+        .hc-clearall{background:transparent;color:#d33;border:none;border-radius:6px;font-size:12px;padding:4px 8px;cursor:pointer;}
+        .hc-clearall:hover{background:rgba(229,57,53,.08);}
         .hc-head-actions{display:inline-flex;align-items:center;gap:6px;}
-        .hc-btn{background:#f2f2f7;color:#444;border:1px solid #ddd;border-radius:6px;font-size:12px;padding:4px 9px;cursor:pointer;transition:background .15s;}
-        .hc-btn:hover{background:#e8e8f0;}
-        [data-pp-theme="dark"] .hc-head-actions .hc-btn{ background:#24242e !important; color:#dcdce2 !important; border-color:#34344a !important; }
-        [data-pp-theme="dark"] .hc-head-actions .hc-btn:hover{ background:#2e2e3c !important; }
+        .hc-btn{background:transparent;color:#666;border:none;border-radius:6px;font-size:12px;padding:4px 8px;cursor:pointer;transition:all .15s;}
+        .hc-btn:hover{background:rgba(0,0,0,.06);}
+        [data-pp-theme="dark"] .hc-head-actions .hc-btn{ background:transparent !important; color:#aaa !important; border:none !important; }
+        [data-pp-theme="dark"] .hc-head-actions .hc-btn:hover{ background:rgba(255,255,255,.08) !important; color:#fff !important; }
         /* ★【问题四】继续观看 · 导出 / 导入 / 清空全部 按钮重设计
          *   图标 + 文字胶囊按钮，导出/导入为蓝紫渐变，清空为警示红，中间用竖分隔线区隔 */
         .hc-head-actions{display:inline-flex;align-items:center;gap:0;}
         .hc-btn{
-            display:inline-flex;align-items:center;gap:5px;
-            height:30px;padding:0 12px;
-            font-size:12.5px;font-weight:600;color:#4a4a5a;
-            background:rgba(255,255,255,0.92);border:1px solid #e6e6f0;
-            border-radius:8px;cursor:pointer;
-            box-shadow:0 1px 2px rgba(0,0,0,0.04);
-            transition:all .18s cubic-bezier(.22,.7,.35,1);
+            display:inline-flex;align-items:center;gap:4px;
+            height:28px;padding:0 6px;
+            font-size:12.5px;font-weight:600;color:#666;
+            background:transparent;border:none;
+            border-radius:6px;cursor:pointer;
+            transition:all .18s ease;
         }
-        .hc-btn + .hc-btn{ margin-left:6px; }
+        .hc-btn + .hc-btn{ margin-left:2px; }
         .hc-btn-ic{ font-size:14px;line-height:1;flex:none; }
         .hc-btn-tx{ line-height:1; }
+        .hc-btn:hover{ background:rgba(0,0,0,.06); color:#333; }
         .hc-btn:active{ transform:scale(.96); }
-        /* 导出 / 导入：蓝紫主题 */
-        .hc-btn.hc-export,
-        .hc-btn.hc-import{
-            color:#5b4bff;border-color:rgba(91,75,255,0.28);
-            background:linear-gradient(135deg,rgba(91,75,255,0.10),rgba(124,107,255,0.06));
-        }
-        .hc-btn.hc-export:hover,
-        .hc-btn.hc-import:hover{
-            color:#fff;border-color:transparent;
-            background:linear-gradient(135deg,#6a5cff,#4b8cff);
-            box-shadow:0 4px 12px rgba(91,75,255,0.32);
-            transform:translateY(-1px);
-        }
-        /* 清空全部：警示红主题 */
-        .hc-btn.hc-clearall{
-            color:#e53935;border-color:rgba(229,57,53,0.3);
-            background:linear-gradient(135deg,rgba(229,57,53,0.10),rgba(255,82,82,0.06));
-        }
-        .hc-btn.hc-clearall:hover{
-            color:#fff;border-color:transparent;
-            background:linear-gradient(135deg,#ff5a5f,#e53935);
-            box-shadow:0 4px 12px rgba(229,57,53,0.34);
-            transform:translateY(-1px);
-        }
+        .hc-btn.hc-export:hover{ color:#5b4bff; }
+        .hc-btn.hc-import:hover{ color:#5b4bff; }
+        .hc-btn.hc-clearall:hover{ color:#e53935; background:rgba(229,57,53,.08); }
         /* 导出/导入组 与 清空组 之间的分隔线 */
-        .hc-act-sep{
-            width:1px;height:18px;margin:0 8px;
-            background:linear-gradient(180deg,transparent,#e2e2ea,transparent);
-            flex:none;
-        }
+        .hc-act-sep{display:none;}
         /* 深色模式适配 */
         [data-pp-theme="dark"] .hc-btn{
-            color:#c8c8d8 !important;background:rgba(36,36,46,0.92) !important;border-color:#34344a !important;
+            color:#aaa !important;background:transparent !important;border:none !important;
         }
         [data-pp-theme="dark"] .hc-btn.hc-export,
         [data-pp-theme="dark"] .hc-btn.hc-import{
@@ -17478,7 +18246,7 @@ setTimeout(()=>{
         .hc-del{flex:0 0 auto;align-self:center;background:#fff0f0;border:1px solid #f5c6cb;color:#d33;
             font-size:12px;line-height:1;cursor:pointer;padding:6px 12px;border-radius:6px;margin:0 10px;}
         .hc-del:hover{background:#ffe3e3;}
-        .hc-title{font-size:14px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .hc-title{font-size:14px;font-weight:bold;overflow:hidden;line-height:1.4;}
         /* v0.2.0 继续观看标题三色提醒：更新=黄 / 未更新=灰 / 看完=绿 */
         .hc-title{color:#9aa0ac !important;}
         .hc-title.hc-title-yellow{color:#ffb300 !important;text-shadow:0 0 10px rgba(255,179,0,.35);}
@@ -17706,8 +18474,39 @@ setTimeout(()=>{
         if (document.querySelector('#hhkan-back2top-styles')) return;
         const st = document.createElement('style');
         st.id = 'hhkan-back2top-styles';
-        st.textContent = '\n        /* ★ 圆形返回顶部按钮（强制右下角，不可移动，不可覆盖） */\n        #hhkan-back2top {\n            /* ---- 定位：fixed + 右下角，唯一可信锚点 ---- */\n            position: fixed !important;\n            right: calc(' + LOCK_RIGHT + 'px + env(safe-area-inset-right, 0px)) !important;\n            bottom: calc(' + LOCK_BOTTOM + 'px + env(safe-area-inset-bottom, 0px)) !important;\n            left: auto !important;\n            top: auto !important;\n            /* ---- 外观 ---- */\n            width: 46px;\n            height: 46px;\n            border-radius: 50%;\n            border: none;\n            padding: 0;\n            margin: 0;\n            z-index: ' + CFG.Z_INDEX + ';\n            cursor: pointer;\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            background: linear-gradient(135deg, #5b4bff 0%, #8a7bff 100%);\n            box-shadow: 0 6px 18px rgba(91, 75, 255, 0.35),\n                        inset 0 1px 2px rgba(255, 255, 255, 0.35);\n            color: #fff;\n            opacity: 0;\n            transform: scale(0.6);\n            visibility: hidden;\n            /* 过渡里绝不出现 left/top/right/bottom，避免动画过程偏移 */\n            transition: opacity .25s ease, transform .25s cubic-bezier(.22,1,.36,1),\n                        box-shadow .2s ease, background .2s ease;\n            -webkit-tap-highlight-color: transparent;\n            touch-action: none;\n        }\n        /* ★ 任何状态下都不得把按钮改成 absolute 或挪到其它角 */\n        html > #hhkan-back2top {\n            position: fixed !important;\n            right: calc(' + LOCK_RIGHT + 'px + env(safe-area-inset-right, 0px)) !important;\n            bottom: calc(' + LOCK_BOTTOM + 'px + env(safe-area-inset-bottom, 0px)) !important;\n            left: auto !important;\n            top: auto !important;\n        }\n        /* ★ 显示态：只管显隐，不碰定位 */\n        #hhkan-back2top.b2t-show {\n            opacity: 1;\n            transform: scale(1);\n            visibility: visible;\n        }\n        #hhkan-back2top:hover {\n            background: linear-gradient(135deg, #4a3dee 0%, #7c6bff 100%);\n            box-shadow: 0 8px 24px rgba(91, 75, 255, 0.5),\n                        inset 0 1px 2px rgba(255, 255, 255, 0.4);\n        }\n        #hhkan-back2top:active { transform: scale(0.92); }\n        /* ★ 拖动期间：关掉位移过渡，避免跟手滞后；光标改 grabbing */\n        #hhkan-back2top.b2t-dragging {\n            transition: opacity .25s ease, transform .25s cubic-bezier(.22,1,.36,1),\n                        box-shadow .2s ease, background .2s ease;\n            cursor: grabbing;\n            box-shadow: 0 12px 30px rgba(91, 75, 255, 0.55),\n                        inset 0 1px 2px rgba(255, 255, 255, 0.4);\n        }\n        /* ★ 拖动到位时弹一下反馈（结束后立刻复位回右下角） */\n        #hhkan-back2top.b2t-snap {\n            animation: b2tSnap .35s ease;\n        }\n        @keyframes b2tSnap {\n            0%   { transform: scale(1); }\n            40%  { transform: scale(1.12); }\n            100% { transform: scale(1); }\n        }\n        /* ★ 箭头：纯 CSS 向上箭头，不依赖图标字体 */\n        #hhkan-back2top .b2t-arrow {\n            width: 13px;\n            height: 13px;\n            border-left: 3px solid #fff;\n            border-top: 3px solid #fff;\n            border-radius: 2px;\n            transform: rotate(45deg) translate(1px, 1px);\n            margin-top: 5px;\n            pointer-events: none;\n        }\n        /* ★ 悬停文字气泡（位于按钮左侧，朝右指向按钮） */\n        #hhkan-back2top .b2t-tip {\n            position: absolute;\n            right: 56px;\n            top: 50%;\n            transform: translateY(-50%) translateX(6px);\n            background: rgba(20, 20, 30, 0.92);\n            color: #fff;\n            font-size: 12.5px;\n            line-height: 1.4;\n            white-space: nowrap;\n            padding: 6px 11px;\n            border-radius: 8px;\n            pointer-events: none;\n            opacity: 0;\n            visibility: hidden;\n            transition: opacity .18s ease, transform .18s ease;\n            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);\n        }\n        #hhkan-back2top .b2t-tip::after {\n            content: "";\n            position: absolute;\n            right: -5px;\n            top: 50%;\n            transform: translateY(-50%);\n            border: 5px solid transparent;\n            border-left-color: rgba(20, 20, 30, 0.92);\n        }\n        #hhkan-back2top:hover .b2t-tip,\n        #hhkan-back2top:focus-visible .b2t-tip {\n            opacity: 1;\n            visibility: visible;\n            transform: translateY(-50%) translateX(0);\n        }\n        /* ★ 全屏播放时隐藏，避免遮挡控件 */\n        :fullscreen ~ #hhkan-back2top,\n        *:fullscreen #hhkan-back2top { display: none; }\n        /* ★ 窄屏自适应：窗口不足以容纳「按钮+气泡」时隐藏气泡 */\n        @media (max-width: 520px) {\n            #hhkan-back2top .b2t-tip { display: none; }\n        }\n        /* ★ 超窄屏/横屏自动收紧右下角距离，但绝不改变"右下角" */\n        @media (max-width: 380px), (orientation: landscape) and (max-height: 420px) {\n            #hhkan-back2top {\n                right: calc(12px + env(safe-area-inset-right, 0px)) !important;\n                bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;\n            }\n        }\n        ';
+        st.textContent = '\n        /* ★ 圆形返回顶部按钮（强制右下角，不可移动，不可覆盖） */\n        #hhkan-back2top {\n            /* ---- 定位：fixed + 右下角，唯一可信锚点 ---- */\n            position: fixed !important;\n            right: calc(' + LOCK_RIGHT + 'px + env(safe-area-inset-right, 0px)) !important;\n            bottom: calc(' + LOCK_BOTTOM + 'px + env(safe-area-inset-bottom, 0px)) !important;\n            left: auto !important;\n            top: auto !important;\n            /* ---- 外观 ---- */\n            width: 46px;\n            height: 46px;\n            border-radius: 50%;\n            border: none;\n            padding: 0;\n            margin: 0;\n            z-index: ' + CFG.Z_INDEX + ';\n            cursor: pointer;\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            background: linear-gradient(135deg, #ff8a00 0%, #ff5e3a 100%);\n            box-shadow: 0 6px 18px rgba(255, 94, 58, 0.35),\n                        inset 0 1px 2px rgba(255, 255, 255, 0.35);\n            color: #fff;\n            opacity: 0;\n            transform: scale(0.6);\n            visibility: hidden;\n            /* 过渡里绝不出现 left/top/right/bottom，避免动画过程偏移 */\n            transition: opacity .25s ease, transform .25s cubic-bezier(.22,1,.36,1),\n                        box-shadow .2s ease, background .2s ease;\n            -webkit-tap-highlight-color: transparent;\n            touch-action: none;\n        }\n        /* ★ 任何状态下都不得把按钮改成 absolute 或挪到其它角 */\n        html > #hhkan-back2top {\n            position: fixed !important;\n            right: calc(' + LOCK_RIGHT + 'px + env(safe-area-inset-right, 0px)) !important;\n            bottom: calc(' + LOCK_BOTTOM + 'px + env(safe-area-inset-bottom, 0px)) !important;\n            left: auto !important;\n            top: auto !important;\n        }\n        /* ★ 显示态：只管显隐，不碰定位 */\n        #hhkan-back2top.b2t-show {\n            opacity: 1;\n            transform: scale(1);\n            visibility: visible;\n        }\n        #hhkan-back2top:hover {\n            background: linear-gradient(135deg, #ff7700 0%, #ff4a26 100%);\n            box-shadow: 0 8px 24px rgba(255, 94, 58, 0.5),\n                        inset 0 1px 2px rgba(255, 255, 255, 0.4);\n        }\n        #hhkan-back2top:active { transform: scale(0.92); }\n        /* ★ 拖动期间：关掉位移过渡，避免跟手滞后；光标改 grabbing */\n        #hhkan-back2top.b2t-dragging {\n            transition: opacity .25s ease, transform .25s cubic-bezier(.22,1,.36,1),\n                        box-shadow .2s ease, background .2s ease;\n            cursor: grabbing;\n            box-shadow: 0 12px 30px rgba(255, 94, 58, 0.55),\n                        inset 0 1px 2px rgba(255, 255, 255, 0.4);\n        }\n        /* ★ 拖动到位时弹一下反馈（结束后立刻复位回右下角） */\n        #hhkan-back2top.b2t-snap {\n            animation: b2tSnap .35s ease;\n        }\n        @keyframes b2tSnap {\n            0%   { transform: scale(1); }\n            40%  { transform: scale(1.12); }\n            100% { transform: scale(1); }\n        }\n        /* ★ 箭头：纯 CSS 向上箭头，不依赖图标字体 */\n        #hhkan-back2top .b2t-arrow {\n            width: 13px;\n            height: 13px;\n            border-left: 3px solid #fff;\n            border-top: 3px solid #fff;\n            border-radius: 2px;\n            transform: rotate(45deg) translate(1px, 1px);\n            margin-top: 5px;\n            pointer-events: none;\n        }\n        /* ★ 悬停文字气泡（位于按钮左侧，朝右指向按钮） */\n        #hhkan-back2top .b2t-tip {\n            position: absolute;\n            right: 56px;\n            top: 50%;\n            transform: translateY(-50%) translateX(6px);\n            background: rgba(20, 20, 30, 0.92);\n            color: #fff;\n            font-size: 12.5px;\n            line-height: 1.4;\n            white-space: nowrap;\n            padding: 6px 11px;\n            border-radius: 8px;\n            pointer-events: none;\n            opacity: 0;\n            visibility: hidden;\n            transition: opacity .18s ease, transform .18s ease;\n            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);\n        }\n        #hhkan-back2top .b2t-tip::after {\n            content: "";\n            position: absolute;\n            right: -5px;\n            top: 50%;\n            transform: translateY(-50%);\n            border: 5px solid transparent;\n            border-left-color: rgba(20, 20, 30, 0.92);\n        }\n        #hhkan-back2top:hover .b2t-tip,\n        #hhkan-back2top:focus-visible .b2t-tip {\n            opacity: 1;\n            visibility: visible;\n            transform: translateY(-50%) translateX(0);\n        }\n        /* ★ 全屏播放时隐藏，避免遮挡控件 */\n        :fullscreen ~ #hhkan-back2top,\n        *:fullscreen #hhkan-back2top { display: none; }\n        /* ★ 窄屏自适应：窗口不足以容纳「按钮+气泡」时隐藏气泡 */\n        @media (max-width: 520px) {\n            #hhkan-back2top .b2t-tip { display: none; }\n        }\n        /* ★ 超窄屏/横屏自动收紧右下角距离，但绝不改变"右下角" */\n        @media (max-width: 380px), (orientation: landscape) and (max-height: 420px) {\n            #hhkan-back2top {\n                right: calc(12px + env(safe-area-inset-right, 0px)) !important;\n                bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;\n            }\n        }\n        ';
         (document.head || document.documentElement).appendChild(st);
+
+        /* ★ v0.2.5：返回顶部按钮适配弹窗毛玻璃装饰效果 */
+        var decoSt = document.createElement('style');
+        decoSt.id = 'hhkan-back2top-deco';
+        decoSt.textContent = [
+            /* off 模式：保持纯色实心 */
+            'html[data-hhkan-decoration="off"] #hhkan-back2top{',
+            '  backdrop-filter:none !important;',
+            '  -webkit-backdrop-filter:none !important;',
+            '  background: linear-gradient(135deg, #ff8a00 0%, #ff5e3a 100%) !important;',
+            '}',
+            /* glass 模糊模式：轻毛玻璃质感 */
+            'html[data-hhkan-decoration="glass"] #hhkan-back2top{',
+            '  background:linear-gradient(135deg, rgba(120,180,255,.75), rgba(90,150,255,.75)) !important;',
+            '  backdrop-filter:blur(12px) saturate(1.4) !important;',
+            '  -webkit-backdrop-filter:blur(12px) saturate(1.4) !important;',
+            '}',
+            /* frosted 亚克力模式：保持原橙色，只加毛玻璃效果 */
+            'html[data-hhkan-decoration="frosted"] #hhkan-back2top{',
+            '  background: linear-gradient(135deg, #ff8a00 0%, #ff5e3a 100%) !important;',
+            '  backdrop-filter:blur(20px) saturate(1.5) brightness(1.1) !important;',
+            '  -webkit-backdrop-filter:blur(20px) saturate(1.5) brightness(1.1) !important;',
+            '}',
+            /* solid 云母模式：暖橙实底微透 */
+            'html[data-hhkan-decoration="solid"] #hhkan-back2top{',
+            '  background:linear-gradient(135deg, rgba(255,160,60,.92), rgba(255,120,40,.92)) !important;',
+            '  backdrop-filter:blur(6px) saturate(1.2) !important;',
+            '  -webkit-backdrop-filter:blur(6px) saturate(1.2) !important;',
+            '}',
+        ].join('\n');
+        (document.head || document.documentElement).appendChild(decoSt);
     }
 
     // 获取真实滚动距离（兼容各站点滚动容器差异）
@@ -20280,15 +21079,47 @@ if (document.readyState === "loading") {
     }
     function curKind() { try { if (typeof hhkanContentType === 'function') { var k = hhkanContentType(); if (k) return k; } } catch (e) { } return ''; }
     function curTotalOnPage() {
+        // ★ 修复：集数只认「线路集数最多的那条」——先数各线路播放列表的链接数，取最大值；
+        //   只有线路列表数不到时，才退化为页面文本正则兜底（避免侧边推荐卡片污染）。
         try {
-            var txt = document.title + ' ' + (document.body ? document.body.innerText.slice(0, 3000) : '');
-            var m = txt.match(/共\s*(\d+)\s*(?:集|期)/);
-            if (m) return parseInt(m[1]) || 0;
+            // ★ 权威：数每个线路播放列表的集数，取最大值（不累计所有线路）
+            // 扩展选择器，适配 MacCMS/苹果CMS 等各类影视站结构
+            var maxByList = 0;
+            var listSelectors = [
+                '.stui-content__playlist', '.module-play-list', '.playlist', '.play_list', 
+                '.play-list', '.episode-list', '.play_source_list', '.playurl-list',
+                '.vod-play-list', '.play_from', '.play-list-items', '.playlist-items',
+                '.stui-pannel__box', '.module-content', '.playurl', '.play_box'
+            ].join(',');
+            document.querySelectorAll(listSelectors).forEach(function (list) {
+                var cnt = list.querySelectorAll('a').length;
+                if (cnt > maxByList) maxByList = cnt;
+            });
+            if (maxByList > 1) return maxByList;
         } catch (e) { }
         try {
-            var n = 0;
-            document.querySelectorAll('.episode-list .episode-item').forEach(function () { n++; });
-            if (n > 1) return n;
+            var txt = document.title + ' ' + (document.body ? document.body.innerText.slice(0, 8000) : '');
+            // ★ 兜底：匹配各种集数描述格式，取最大值
+            var patterns = [
+                /共\s*(\d+)\s*(?:集|期)/g,
+                /全\s*(\d+)\s*(?:集|期)/g,
+                /更新至\s*第?\s*(\d+)\s*(?:集|期)/g,
+                /更新第\s*(\d+)\s*(?:集|期)/g,
+                /第\s*(\d+)\s*(?:集|期)\s*全/g,
+                /第\s*(\d+)\s*(?:集|期)\s*已完结/g,
+                /(\d+)\s*集\s*全/g
+            ];
+            var maxByLabel = 0;
+            patterns.forEach(function (pat) {
+                var mList = txt.match(pat);
+                if (mList && mList.length) {
+                    mList.forEach(function (mt) {
+                        var mn = parseInt((mt.match(/\d+/) || [])[0]) || 0;
+                        if (mn > maxByLabel) maxByLabel = mn;
+                    });
+                }
+            });
+            if (maxByLabel > 0) return maxByLabel;
         } catch (e) { }
         return 0;
     }
@@ -20347,6 +21178,9 @@ if (document.readyState === "loading") {
             'body > div.t-p > div.t-p-main > div.main > div.detail-box.fs-margin-section > div.detail-box-main > div.detail-controls > div.detail-control > .hhk-fav-btn{background:linear-gradient(135deg,#ff8a00 0%,#ff5e3a 100%) !important;}',
             'body > div.t-p > div.t-p-main > div.main > div.detail-box.fs-margin-section > div.detail-box-main > div.detail-controls > div.detail-control > .hhk-fav-btn.faved{background:linear-gradient(135deg,#2ecc71 0%,#1abc9c 100%) !important;}',
             'body > div.t-p > div.t-p-main > div.main > div.search-result-info-wrap.fs-margin-section > div.side{display:none !important;}',
+            /* ★ 任务栏「我的收藏」按钮小红点：有未看新集时右上角亮红点提醒 */
+            '#btn-fav{position:relative;}',
+            '#btn-fav.has-fav-upd::after{content:"";position:absolute;top:3px;right:4px;width:9px;height:9px;background:#ff3b30;border-radius:50%;box-shadow:0 0 0 2px rgba(255,255,255,.65);pointer-events:none;}',
         ].join('\n');
         document.head.appendChild(css);
     }
@@ -20404,33 +21238,36 @@ if (document.readyState === "loading") {
     function fetchDetailTotal(id) {
         return new Promise(function (resolve) {
             if (!id) { resolve(0); return; }
-            var paths = ['/detail/' + id + '.html', '/movie/' + id + '.html', '/voddetail/' + id + '.html'];
+            // 扩展路径，适配各类影视站 URL 格式
+            var paths = [
+                '/detail/' + id + '.html',
+                '/movie/' + id + '.html',
+                '/voddetail/' + id + '.html',
+                '/vod/' + id + '.html',
+                '/index.php/vod/detail/id/' + id + '.html',
+                '/index.php/detail/' + id + '.html',
+                '/detail/' + id + '/',
+                '/movie/' + id + '/'
+            ];
             var host = location.origin, pi = 0;
             function tryNext() {
                 if (pi >= paths.length) { resolve(0); return; }
                 var url = host + paths[pi++];
                 try {
                     var xhr = new XMLHttpRequest();
-                    xhr.timeout = 6000;
+                    xhr.timeout = 8000;
                     xhr.open('GET', url, true);
+                    // ★ 防WAF限速：伪装成正常浏览器请求
+                    xhr.setRequestHeader('Referer', location.origin + '/');
+                    xhr.setRequestHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8');
+                    xhr.setRequestHeader('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8');
                     xhr.onload = function () {
                         if (xhr.status !== 200) { tryNext(); return; }
-                        var html = xhr.responseText || '', total = 0;
-                        var m = html.match(/共\s*(\d+)\s*(?:集|期)/);
-                        if (m) total = parseInt(m[1]) || 0;
-                        if (total <= 0) {
-                            var ld = html.match(/"numberOfEpisodes"\s*:\s*"?(\d+)/i);
-                            if (ld) total = parseInt(ld[1]) || 0;
-                        }
-                        if (total <= 0) {
-                            var maxN = 0;
-                            (html.match(/第\s*\d+\s*(?:集|期)/gi) || []).forEach(function (t) {
-                                var n = parseInt((t.match(/\d+/) || [])[0]) || 0;
-                                if (n > maxN) maxN = n;
-                            });
-                            total = maxN;
-                        }
-                        // ★ 封面补全交给 ensureHhkanPoster（处理 WAF），这里只更新集数
+                        var html = xhr.responseText || '';
+                        // v12 统一调用共享解析函数（按线路取集数最多的那条）
+                        var total = (typeof window.__hhkanParseTotalEpsFromHtml === 'function')
+                            ? window.__hhkanParseTotalEpsFromHtml(html)
+                            : 0;
                         resolve(total);
                     };
                     xhr.onerror = tryNext;
@@ -20450,17 +21287,103 @@ if (document.readyState === "loading") {
         return 0;
     }
 
+    // ============================================================
+    // ★ 新增：收藏「真·有更新」统一判定 + 任务栏小红点 + 开屏后台扫描
+    //  判定标准（严格按需求）：
+    //   1) 真的更新了新集：total > prevTotal（上次记录之后站方加了新集）
+    //   2) 你还没追到最新：watched < total（看到最新集后此条自动变 false → 角标/红点消失）
+    //   —— 不再把"看过一半没看完"误判成"有更新"。
+    // ============================================================
+    function favHasUpd(f) {
+        var total = parseInt(f.total) || 0;
+        var prev = parseInt(f.prevTotal) || 0;
+        if (total <= 0 || prev <= 0 || total <= prev) return false;
+        var w = watchedEpOf(f.key);
+        return w < total;
+    }
+    // ★ 任务栏「我的收藏」按钮小红点：
+    //   存在任一"真有新集且没追到最新，且本次更新后还没打开过收藏弹窗"的收藏 → 亮红点
+    function refreshFavBadge() {
+        try {
+            var favs = loadFav();
+            var has = favs.some(function (f) {
+                if (!favHasUpd(f)) return false;
+                // 已打开过收藏弹窗看过这次提醒（badgeReadAt 晚于更新发生时间 updAt）→ 不亮
+                if (f.updAt && f.badgeReadAt && f.badgeReadAt >= f.updAt) return false;
+                return true;
+            });
+            var btn = document.querySelector('#btn-fav');
+            if (btn) btn.classList.toggle('has-fav-upd', has);
+        } catch (e) { }
+    }
+    // ★ 开屏后台自动扫描收藏更新（不依赖打开收藏弹窗），发现新集即写 updAt 并点亮任务栏红点
+    function backgroundCheckFavs() {
+        try {
+            var favs = loadFav();
+            var now = Date.now();
+            var queue = favs.filter(function (f) {
+                return f.movieId && (!f.lastCheckedAt || (now - f.lastCheckedAt) > FAV_UPD_TTL);
+            });
+            if (!queue.length) { refreshFavBadge(); return; }
+            var i = 0, working = 0, LIMIT = 2;
+            function pump() {
+                while (working < LIMIT && i < queue.length) {
+                    var it = queue[i++]; working++;
+                    (function (item) {
+                        fetchDetailTotal(item.movieId).then(function (latest) {
+                            working--;
+                            if (latest > 1) {
+                                var L = loadFav();
+                                for (var k = 0; k < L.length; k++) {
+                                    if (L[k].key === item.key) {
+                                        if (latest > (parseInt(L[k].total) || 0)) {
+                                            L[k].prevTotal = parseInt(L[k].total) || latest;
+                                            L[k].total = latest;
+                                            if (L[k].kind === 'movie') L[k].kind = 'series';
+                                            L[k].updAt = Date.now();   // ★ 记录更新发生时间，驱动红点
+                                        }
+                                        L[k].lastCheckedAt = Date.now();
+                                        break;
+                                    }
+                                }
+                                saveFav(L);
+                            } else {
+                                var L0 = loadFav();
+                                for (var k0 = 0; k0 < L0.length; k0++) {
+                                    if (L0[k0].key === item.key) { L0[k0].lastCheckedAt = Date.now(); break; }
+                                }
+                                saveFav(L0);
+                            }
+                            refreshFavBadge();
+                            if (i < queue.length || working > 0) pump();
+                        }).catch(function () { working--; if (i < queue.length || working > 0) pump(); });
+                    })(it);
+                }
+            }
+            pump();
+        } catch (e) { refreshFavBadge(); }
+    }
+
     var CUR_TAB = 'all';
     var CUR_PAGE = 1;
     var PAGE_SIZE = 9;
     function openFav() {
-        if (document.querySelector('#hhk-fav-mask')) return;
+        // ★ 修复"打不开"：脚本重载/上次崩溃可能残留 #hhk-fav-mask 的空DOM，
+        //   旧逻辑是检测到就 return，导致用户永远打不开；改为先清理残留再重建。
+        var __oldFavMask = document.querySelector('#hhk-fav-mask');
+        if (__oldFavMask) { try { __oldFavMask.remove(); } catch (e) { } }
         CUR_PAGE = 1;
-        if (typeof requestOpenModal === 'function' && !requestOpenModal('hhk-fav-mask')) return;
+        // ★ 问题一修复：打开收藏前，强制关闭所有其他弹窗
+        if (typeof requestOpenModal === 'function') {
+            if (!requestOpenModal('hhk-fav-mask')) return;
+        } else {
+            // 兜底：手动关闭所有已知弹窗
+            document.querySelectorAll('#hhkan-continue-mask, #hhkan-enhance-settings, #episode-modal-mask, #player-setting-mask, #recommend-modal-mask, #hhk-fav-mask').forEach(function(el){ el.remove(); });
+        }
 
         var cssText = [
             '#hhk-fav-mask{position:fixed;inset:0;z-index:2147483646;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;overflow-y:auto;padding:20px 0;}',
-            '#hhk-fav-box{width:min(760px,94vw);max-height:86vh;background:rgba(255,255,255,.92);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 56px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.5);}',
+            '#hhk-fav-box{width:min(920px,94vw);height:940px;max-height:94vh;background:rgba(255,255,255,.92);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 56px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.5);}',
             'html[data-pp-theme="dark"] #hhk-fav-box{background:rgba(28,28,36,.88);border-color:rgba(255,255,255,.08);}',
             'html[data-pp-theme="dark"] #hhk-fav-list{background:transparent;}',
             'html[data-pp-theme="dark"] #hhk-fav-tabs{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.08);}',
@@ -20480,13 +21403,28 @@ if (document.readyState === "loading") {
             '#hhk-fav-tabs{display:flex;gap:6px;padding:10px 14px;background:#fafafa;border-bottom:1px solid #eee;flex-wrap:wrap;}',
             '#hhk-fav-tabs button{background:#fff;border:1px solid #ddd;color:#666;padding:5px 14px;border-radius:16px;cursor:pointer;font-size:12px;}',
             '#hhk-fav-tabs button.on{background:linear-gradient(135deg,#ff8a00,#ff5e3a);color:#fff;border-color:transparent;}',
-            '#hhk-fav-list{padding:14px;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-content:start;}',
-            '.hf-card{position:relative;border-radius:10px;overflow:hidden;background:#f5f5f8;cursor:pointer;transition:transform .15s;}',
+            '#hhk-fav-list{padding:14px;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-content:start;flex:1;}',
+            /* ★ 小窗口自适应：确保标题和集数始终可见 */
+            '@media (max-width: 850px){',
+            '  #hhk-fav-list{grid-template-columns:repeat(2,1fr);gap:10px;padding:10px;}',
+            '  .hf-card img, .hf-card .hf-noposter{width:45%;}',
+            '  .hf-card .hf-title{font-size:11px;padding:6px 6px 2px;line-height:1.3;}',
+            '  .hf-card .hf-eps{font-size:10px;padding:0 6px 5px;}',
+            '}',
+            '@media (max-width: 550px){',
+            '  #hhk-fav-list{grid-template-columns:1fr;gap:8px;padding:10px;}',
+            '  .hf-card{display:flex;flex-direction:row;align-items:stretch;background:#f5f5f8;overflow:visible;}',
+            '  .hf-card img, .hf-card .hf-noposter{width:64px !important;margin:8px 0 8px 8px;flex-shrink:0;aspect-ratio:2/3;border-radius:6px;}',
+            '  .hf-card .hf-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;padding:4px 8px 4px 4px;overflow:visible;}',
+            '  .hf-card .hf-title{padding:0;font-size:12px;line-height:1.3;white-space:normal;word-break:break-all;overflow:visible;}',
+            '  .hf-card .hf-eps{padding:3px 0 0;font-size:11px;flex-shrink:0;overflow:visible;}',
+            '}',
+            '.hf-card{position:relative;border-radius:10px;overflow:visible;background:#f5f5f8;cursor:pointer;transition:transform .15s;display:flex;flex-direction:column;}',
             '.hf-card:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.15);}',
             '.hf-card img{width:42%;margin:0 auto;aspect-ratio:2/3;object-fit:cover;display:block;background:#ddd;}',
             '.hf-card .hf-noposter{width:42%;margin:0 auto;aspect-ratio:2/3;display:flex;align-items:center;justify-content:center;font-size:28px;background:linear-gradient(135deg,#ffe8d6,#ffd0b0);color:#ff8a00;}',
-            '.hf-card .hf-title{padding:7px 8px 2px;font-size:12px;line-height:1.35;color:#333;position:relative;z-index:1;word-break:break-all;}',
-            '.hf-card .hf-eps{padding:0 8px 6px;font-size:11px;color:#ff8a00;}',
+            '.hf-card .hf-title{padding:7px 8px 2px;font-size:12px;line-height:1.35;color:#333;position:relative;z-index:1;word-break:break-all;overflow:visible;}',
+            '.hf-card .hf-eps{padding:0 8px 6px;font-size:11px;color:#ff8a00;flex-shrink:0;}',
             '.hf-card .hf-upd{position:absolute;top:6px;right:6px;background:#ff3b30;color:#fff;font-size:11px;font-weight:bold;padding:3px 8px;border-radius:10px;box-shadow:0 2px 6px rgba(255,59,48,.5);}',
             '.hf-card .hf-kind{position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.65);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;z-index:2;}',
             '.hf-card .hf-upd{position:absolute;top:6px;right:6px;background:#ff3b30;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;box-shadow:0 2px 6px rgba(255,59,48,.4);}',
@@ -20503,6 +21441,58 @@ if (document.readyState === "loading") {
         var style = document.createElement('style');
         style.textContent = cssText;
         document.head.appendChild(style);
+
+        /* ★ v0.2.5：收藏模块专用精美提示弹窗（与继续观看同款） */
+        function _ensureFavToastCss() {
+            if (document.getElementById('hhk-fav-toast-css')) return;
+            var s = document.createElement('style');
+            s.id = 'hhk-fav-toast-css';
+            s.textContent = [
+                '#hhk-fav-toast{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);opacity:0;transition:opacity .25s ease;pointer-events:none;}',
+                '#hhk-fav-toast.fav-show{opacity:1;pointer-events:auto;}',
+                '.fav-toast-box{position:relative;width:340px;max-width:86vw;padding:28px 24px 22px;text-align:center;background:linear-gradient(160deg,#1e1e2e 0%,#232340 55%,#1a1a2e 100%);border:1px solid rgba(255,138,0,.35);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.6),0 0 40px rgba(255,138,0,.12) inset;animation:favToastIn .35s cubic-bezier(.22,1,.36,1) forwards;overflow:hidden;}',
+                '@keyframes favToastIn{from{opacity:0;transform:translateY(20px) scale(.94);}to{opacity:1;transform:none;}}',
+                '.fav-toast-box.fav-toast-err{border-color:rgba(255,107,107,.4);background:linear-gradient(160deg,#2a1a1a 0%,#332020 55%,#221414 100%);}',
+                '.fav-toast-icon{font-size:42px;line-height:1;margin-bottom:12px;display:inline-block;animation:favIconPop .5s cubic-bezier(.34,1.56,.64,1) .1s both;}',
+                '@keyframes favIconPop{from{transform:scale(0) rotate(-30deg);opacity:0;}to{transform:scale(1) rotate(0);opacity:1;}}',
+                '.fav-toast-title{font-size:19px;font-weight:700;color:#fff;margin-bottom:8px;letter-spacing:.5px;}',
+                '.fav-toast-desc{font-size:14px;color:#c8c8d8;margin-bottom:6px;}',
+                '.fav-toast-desc b{color:#ff8a00;font-weight:700;}',
+                '.fav-toast-err .fav-toast-desc b{color:#ff6b6b;}',
+                '.fav-toast-file{display:inline-block;max-width:100%;margin:10px auto 4px;padding:8px 14px;border-radius:8px;background:rgba(255,138,0,.12);border:1px solid rgba(255,138,0,.25);font-size:12px;color:#ffb366;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+                '.fav-toast-tip{font-size:12px;color:#7a7a90;margin-top:8px;}',
+                '.fav-ring,.fav-ring2{position:absolute;border-radius:50%;border:2px solid transparent;animation:favRing 1.2s ease-out forwards;pointer-events:none;}',
+                '.fav-ring{top:50%;left:50%;width:60px;height:60px;margin:-30px 0 0 -30px;border-color:rgba(255,138,0,.6);}',
+                '.fav-ring2{top:50%;left:50%;width:60px;height:60px;margin:-30px 0 0 -30px;border-color:rgba(255,94,58,.5);animation-delay:.2s;}',
+                '@keyframes favRing{from{transform:scale(.3);opacity:1;}to{transform:scale(3.5);opacity:0;}}',
+                '[data-pp-theme="light"] #hhk-fav-toast .fav-toast-box{background:linear-gradient(160deg,#ffffff 0%,#fff8f0 55%,#fff5e8 100%);border-color:rgba(255,138,0,.3);box-shadow:0 20px 60px rgba(0,0,0,.18),0 0 40px rgba(255,138,0,.06) inset;}',
+                '[data-pp-theme="light"] .fav-toast-title{color:#1a1a2e;}',
+                '[data-pp-theme="light"] .fav-toast-desc{color:#4a4a5a;}',
+                '[data-pp-theme="light"] .fav-toast-tip{color:#8a8a9a;}',
+            ].join('\n');
+            document.head.appendChild(s);
+        }
+        function showFavNotice(title, desc, icon, file) {
+            _ensureFavToastCss();
+            var old = document.querySelector('#hhk-fav-toast');
+            if (old) old.remove();
+            var t = document.createElement('div');
+            t.id = 'hhk-fav-toast';
+            var fileHtml = file ? '<div class="fav-toast-file" title="' + file + '">📄 ' + file + '</div>' : '';
+            t.innerHTML = '<div class="fav-toast-box">' +
+                '<div class="fav-ring"></div><div class="fav-ring2"></div>' +
+                '<div class="fav-toast-icon">' + (icon || '✅') + '</div>' +
+                '<div class="fav-toast-title">' + title + '</div>' +
+                '<div class="fav-toast-desc">' + (desc || '') + '</div>' +
+                fileHtml +
+                '<div class="fav-toast-tip">' + (file ? '文件已保存到您的下载目录' : '点击弹窗任意位置关闭') + '</div>' +
+                '</div>';
+            document.body.appendChild(t);
+            requestAnimationFrame(function () { t.classList.add('fav-show'); });
+            var dur = file ? 4500 : 3200;
+            setTimeout(function () { t.classList.remove('fav-show'); setTimeout(function () { t.remove(); }, 300); }, dur);
+            t.onclick = function () { t.classList.remove('fav-show'); setTimeout(function () { t.remove(); }, 300); };
+        }
 
         var mask = document.createElement('div');
         mask.id = 'hhk-fav-mask';
@@ -20527,10 +21517,47 @@ if (document.readyState === "loading") {
             '</div>';
         document.body.appendChild(mask);
 
+        // ★ 提前绑定关闭事件：即使后续渲染收藏列表时出错，用户也能点×或点遮罩关闭，不会卡死在空弹窗
+        mask.querySelector('.hf-close').onclick = function () { mask.remove(); };
+        mask.onclick = function (e) { if (e.target === mask) mask.remove(); };
+
         var listEl = mask.querySelector('#hhk-fav-list');
         var emptyEl = mask.querySelector('#hhk-fav-empty');
         var tabsEl = mask.querySelector('#hhk-fav-tabs');
         var pagerEl = mask.querySelector('#hhk-fav-pager');
+
+        // ★ v7.1 自动修正历史误判：旧版本分类逻辑把电影误判成连续剧
+        //   修正规则（更保守，避免把电影错改成连续剧）：
+        //   1) series 但 total<=1 → movie（单集不可能是连续剧）
+        //   2) series 但标题不含任何剧集特征词（剧/季/番/辑）且 total 不大 → 倾向 movie
+        //   ★ 移除旧规则"movie 但 total>=10 → series"：该规则把多线路电影误判为连续剧
+        //     （电影有3-4条线路时 maxItems 被误读为 3-4，再被推荐列表叠加就 >=10）
+        (function autoFixKinds() {
+            var favs = loadFav();
+            var fixed = 0;
+            favs.forEach(function (f) {
+                var t = parseInt(f.total) || 0;
+                var title = (f.title || '');
+                // ★ v15.1 修复：高集数（≥80集）的 series 记录，且标题不含动漫关键词 → 大概率是短剧
+                //   （这个站的短剧详情页URL是 /detail/数字.html，跟普通连续剧格式一样，URL无特征，
+                //    只能靠"集数远超普通连续剧 + 非动漫标题"来识别短剧）
+                if (f.kind === 'series' && t >= 80 && !/动画|动漫|番剧|卡通|国漫|日漫|OVA|剧场版/.test(title)) {
+                    f.kind = 'short'; f.unit = '集'; fixed++; return;
+                }
+                // ★ v15 修复：URL 路径含短剧特征（/short /duanju /dj /mini）的旧记录，
+                //   此前被误判为连续剧，现在自动纠正为短剧
+                if (f.kind === 'series' && /\/short|duanju|\/dj\/|\/mini\//.test((f.url || '').toLowerCase())) {
+                    f.kind = 'short'; f.unit = '集'; fixed++; return;
+                }
+                // 单集记录不可能是连续剧 → 强制电影
+                if (f.kind === 'series' && t > 0 && t <= 1) { f.kind = 'movie'; f.total = 1; fixed++; }
+                // 标题里没有任何剧集特征词，且集数不多（<=3），大概率是被误判的电影
+                else if (f.kind === 'series' && t > 0 && t <= 3 && !/剧|季|番|辑|部曲|连载|更新/.test(title)) {
+                    f.kind = 'movie'; f.total = 1; fixed++;
+                }
+            });
+            if (fixed) { saveFav(favs); if (window.showFloatTip) window.showFloatTip('已自动修正 ' + fixed + ' 条收藏的分类'); }
+        })();
 
         function render() {
             var favs = loadFav();
@@ -20561,8 +21588,11 @@ if (document.readyState === "loading") {
             listEl.innerHTML = pageItems.map(function (f) {
                 var watched = watchedEpOf(f.key);
                 var total = parseInt(f.total) || 0;
-                var hasUpd = (total > 0 && watched > 0 && watched < total);
-                var updBadge = hasUpd ? '<span class="hf-upd">有更新</span>' : '';
+                var prevTotal = parseInt(f.prevTotal) || 0;
+                // ★ 统一判定：只有"真更新了新集(total>prevTotal) 且 你还没追到最新(watched<total)"才亮；
+                //   一旦看到最新集/看完（watched>=total），角标自动消失。
+                var hasUpd = favHasUpd(f);
+                var updBadge = hasUpd ? '<span class="hf-upd">更新了</span>' : '';
                 var kindLabel = KIND_LABEL[f.kind] || '影视';
                 var poster = f.poster
                     ? '<img src="' + f.poster + '" referrerpolicy="no-referrer" onerror="this.outerHTML=\'<div class=hf-noposter>🎬</div>\'">'
@@ -20577,8 +21607,10 @@ if (document.readyState === "loading") {
                     '<button type="button" class="hf-del" data-key="' + f.key + '" title="删除">✕</button>' +
                     poster +
                     '<span class="hf-kind">' + kindLabel + '</span>' +
+                    '<div class="hf-info">' +
                     '<div class="hf-title" title="' + (f.title || '') + '">' + (f.title || '未命名') + '</div>' +
                     epInfo +
+                    '</div>' +
                     '</div>';
             }).join('');
 
@@ -20586,7 +21618,15 @@ if (document.readyState === "loading") {
                 card.addEventListener('click', function (e) {
                     if (e.target.classList.contains('hf-del')) return;
                     var url = card.getAttribute('data-url');
-                    if (url && url !== '#') { mask.remove(); setTimeout(function(){ location.href = url; }, 100); }
+                    if (url && url !== '#') {
+                        mask.remove();
+                        // ★ 问题一修复：自动用当前域名，不跳转到收藏时的原网址
+                        try {
+                            var u = new URL(url, location.origin);
+                            url = location.origin + u.pathname + u.search;
+                        } catch (err) {}
+                        setTimeout(function(){ location.href = url; }, 100);
+                    }
                 });
             });
             listEl.querySelectorAll('.hf-del').forEach(function (btn) {
@@ -20599,27 +21639,30 @@ if (document.readyState === "loading") {
                 });
             });
 
-            // ★ 分页选择夹：超过 PAGE_SIZE 部才显示
-            if (totalPages > 1) {
-                pagerEl.style.display = 'flex';
-                var pHtml = '<button type="button" class="hf-prev"' + (CUR_PAGE <= 1 ? ' disabled' : '') + '>&laquo; 上一页</button>';
-                for (var pi = 1; pi <= totalPages; pi++) {
-                    pHtml += '<button type="button" class="hf-pg' + (pi === CUR_PAGE ? ' on' : '') + '" data-p="' + pi + '">' + pi + '</button>';
-                }
-                pHtml += '<button type="button" class="hf-next"' + (CUR_PAGE >= totalPages ? ' disabled' : '') + '>下一页 &raquo;</button>';
-                pHtml += '<span class="hf-pageinfo">' + CUR_PAGE + ' / ' + totalPages + ' 页 · 共 ' + filtered.length + ' 部</span>';
-                pagerEl.innerHTML = pHtml;
-                pagerEl.querySelector('.hf-prev').onclick = function () { if (CUR_PAGE > 1) { CUR_PAGE--; render(); listEl.scrollTop = 0; } };
-                pagerEl.querySelector('.hf-next').onclick = function () { if (CUR_PAGE < totalPages) { CUR_PAGE++; render(); listEl.scrollTop = 0; } };
-                pagerEl.querySelectorAll('.hf-pg').forEach(function (pb) {
-                    pb.onclick = function () { CUR_PAGE = parseInt(pb.getAttribute('data-p')) || 1; render(); listEl.scrollTop = 0; };
-                });
-            } else {
-                pagerEl.style.display = 'none';
-                pagerEl.innerHTML = '';
+            // ★ 分页选择夹：永远固定在底部显示（优化二）
+            pagerEl.style.display = 'flex';
+            var pHtml = '<button type="button" class="hf-prev"' + (CUR_PAGE <= 1 ? ' disabled' : '') + '>&laquo; 上一页</button>';
+            for (var pi = 1; pi <= totalPages; pi++) {
+                pHtml += '<button type="button" class="hf-pg' + (pi === CUR_PAGE ? ' on' : '') + '" data-p="' + pi + '">' + pi + '</button>';
             }
+            pHtml += '<button type="button" class="hf-next"' + (CUR_PAGE >= totalPages ? ' disabled' : '') + '>下一页 &raquo;</button>';
+            pHtml += '<span class="hf-pageinfo">' + CUR_PAGE + ' / ' + totalPages + ' 页 · 共 ' + filtered.length + ' 部</span>';
+            pagerEl.innerHTML = pHtml;
+            pagerEl.querySelector('.hf-prev').onclick = function () { if (CUR_PAGE > 1) { CUR_PAGE--; render(); listEl.scrollTop = 0; } };
+            pagerEl.querySelector('.hf-next').onclick = function () { if (CUR_PAGE < totalPages) { CUR_PAGE++; render(); listEl.scrollTop = 0; } };
+            pagerEl.querySelectorAll('.hf-pg').forEach(function (pb) {
+                pb.onclick = function () { CUR_PAGE = parseInt(pb.getAttribute('data-p')) || 1; render(); listEl.scrollTop = 0; };
+            });
         }
         render();
+
+        // ★ 打开过收藏弹窗 = 已看过本次更新提醒：标记 badgeReadAt，任务栏小红点消除
+        (function () {
+            var L = loadFav(), touched = false;
+            L.forEach(function (f) { if (favHasUpd(f)) { f.badgeReadAt = Date.now(); touched = true; } });
+            if (touched) saveFav(L);
+            refreshFavBadge();
+        })();
 
         tabsEl.querySelectorAll('button').forEach(function (b) {
             b.addEventListener('click', function () { CUR_TAB = b.getAttribute('data-tab'); CUR_PAGE = 1; render(); });
@@ -20632,20 +21675,23 @@ if (document.readyState === "loading") {
                 return f.movieId && (!f.lastCheckedAt || (now - f.lastCheckedAt) > FAV_UPD_TTL);
             });
             if (!queue.length) return;
-            var i = 0, working = 0, changed = 0, LIMIT = 3;
+            var i = 0, working = 0, changed = 0, LIMIT = 2;
             function pump() {
                 while (working < LIMIT && i < queue.length) {
                     var it = queue[i++]; working++;
                     (function (item) {
                         fetchDetailTotal(item.movieId).then(function (latest) {
                             working--;
-                            if (latest > 0) {
+                            if (latest > 1) {
+                                // v13：只抓到 >1 集才更新；latest<=1 表示没抓准，不碰 kind/total
                                 var L = loadFav();
                                 for (var k = 0; k < L.length; k++) {
                                     if (L[k].key === item.key) {
                                         if (latest > (parseInt(L[k].total) || 0)) {
                                             L[k].prevTotal = parseInt(L[k].total) || latest;
                                             L[k].total = latest;
+                                            if (L[k].kind === 'movie') L[k].kind = 'series';
+                                            L[k].updAt = Date.now();   // ★ 记录更新发生时间，驱动任务栏红点
                                             changed++;
                                         }
                                         L[k].lastCheckedAt = Date.now();
@@ -20653,9 +21699,16 @@ if (document.readyState === "loading") {
                                     }
                                 }
                                 saveFav(L); render();
+                            } else {
+                                // 没抓到（latest<=1）只记录检查时间，不改数据
+                                var L0 = loadFav();
+                                for (var k0 = 0; k0 < L0.length; k0++) {
+                                    if (L0[k0].key === item.key) { L0[k0].lastCheckedAt = Date.now(); break; }
+                                }
+                                saveFav(L0);
                             }
                             if (i >= queue.length && working === 0) {
-                                if (changed > 0 && window.showFloatTip) window.showFloatTip(changed + ' 部收藏有更新 🆕');
+                                if (changed > 0 && window.showFloatTip) window.showFloatTip(changed + ' 部收藏已更新/纠正分类 🆕');
                             } else pump();
                         });
                     })(it);
@@ -20663,7 +21716,8 @@ if (document.readyState === "loading") {
             }
             pump();
         }
-        setTimeout(checkUpdates, 400);
+        // ★ 问题三修复：延迟3秒再后台检查更新，避免刚打开页面就发请求触发限速
+        setTimeout(checkUpdates, 3000);
         // ★ 补封面：对没封面的收藏条目调 ensureHhkanPoster
         (function fillPosters() {
             var favs = loadFav();
@@ -20681,7 +21735,7 @@ if (document.readyState === "loading") {
 
         mask.querySelector('.hf-export').onclick = function () {
             var favs = loadFav();
-            if (!favs.length) { if (window.showFloatTip) window.showFloatTip('收藏是空的'); return; }
+            if (!favs.length) { showFavNotice('没有东西可导出', '当前还没有任何收藏，先去收藏几部片子再来备份吧~', '🙂'); return; }
             var data = { app: '好好看-收藏', version: 'v0.2.1', exportAt: Date.now(), count: favs.length, favorites: favs };
             var json = JSON.stringify(data, null, 2);
             // 文件名：网址名 + 日期时间
@@ -20693,7 +21747,7 @@ if (document.readyState === "loading") {
                 window.showSaveFilePicker({ suggestedName: fname, types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] })
                 .then(function (handle) { return handle.createWritable(); })
                 .then(function (w) { w.write(json); w.close(); })
-                .then(function () { if (window.showFloatTip) window.showFloatTip('已导出 ' + favs.length + ' 条收藏'); })
+                .then(function () { showFavNotice('导出成功', '已导出 <b>' + favs.length + '</b> 条收藏', '📤', fname); })
                 .catch(function (e) { if (e && e.name !== 'AbortError') _fallbackDownload(fname, json); });
             } else {
                 _fallbackDownload(fname, json);
@@ -20707,9 +21761,9 @@ if (document.readyState === "loading") {
                 a.href = url; a.download = fname;
                 document.body.appendChild(a); a.click();
                 setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
-                if (window.showFloatTip) window.showFloatTip('已导出：' + fname);
+                showFavNotice('导出成功', '已导出收藏文件', '📤', fname);
             } catch (e) {
-                if (window.showFloatTip) window.showFloatTip('导出失败：' + (e.message || e));
+                showFavNotice('导出失败', (e.message || e), '⚠️');
             }
         }
 
@@ -20735,9 +21789,9 @@ if (document.readyState === "loading") {
                         if (!map[f.key]) { map[f.key] = f; added++; }
                     });
                     saveFav(Object.values(map)); render();
-                    if (window.showFloatTip) window.showFloatTip('导入成功，新增 ' + added + ' 条');
+                    showFavNotice('导入成功', '新增 <b>' + added + '</b> 条收藏已合并', '📥');
                 } catch (e) {
-                    if (window.showFloatTip) window.showFloatTip('导入失败：文件格式不正确');
+                    showFavNotice('导入失败', '文件格式不正确或已损坏', '⚠️');
                 }
                 impInput.value = '';
             };
@@ -20746,60 +21800,159 @@ if (document.readyState === "loading") {
 
         mask.querySelector('.hf-clear').onclick = function () {
             var favs = loadFav();
-            if (!favs.length) { if (window.showFloatTip) window.showFloatTip('收藏本来就是空的'); return; }
+            if (!favs.length) { showFavNotice('收藏本来就是空的', '还没有收藏任何影片', '🙂'); return; }
             if (typeof hhkanConfirm === 'function') {
                 hhkanConfirm({ title: '确认清空全部收藏？', desc: '即将删除 ' + favs.length + ' 条收藏，此操作不可恢复' }).then(function (ok) {
                     if (!ok) return;
                     saveFav([]); render();
-                    if (window.showFloatTip) window.showFloatTip('已清空全部收藏');
+                    showFavNotice('清除成功', '全部收藏已清空', '🗑');
                 });
             } else if (confirm('确认清空全部 ' + favs.length + ' 条收藏？')) {
                 saveFav([]); render();
+                showFavNotice('清除成功', '全部收藏已清空', '🗑');
             }
         };
-
-        mask.querySelector('.hf-close').onclick = function () { mask.remove(); };
-        mask.onclick = function (e) { if (e.target === mask) mask.remove(); };
     }
 
     try { (window.__hhkanActions = window.__hhkanActions || {}).fav = openFav; } catch (e) { }
-    waitDomReady(function () { watchFavBtns(); });
+    try { (window.__hhkanActions = window.__hhkanActions || {}).refreshFavBadge = refreshFavBadge; } catch (e) { }
+    waitDomReady(function () {
+        watchFavBtns();
+        // ★ 开屏后台自动扫描收藏更新（不依赖打开收藏弹窗），有新集即点亮任务栏红点
+        setTimeout(backgroundCheckFavs, 4000);
+        // ★ 看完/看到新一集后（观看进度变化广播），自动重算红点与卡片角标
+        window.addEventListener('hhkan-history-changed', refreshFavBadge);
+        // 任务栏按钮渲染出来后也刷一次红点（按钮是后面才注入的）
+        setTimeout(refreshFavBadge, 2500);
+    });
 })();
 
 /* ============================================================
- * ★★★ v0.0.7 全局面板毛玻璃（强制覆盖版） ★★★
+ * ★★★ v0.0.8 全局面板毛玻璃（强制覆盖版） ★★★
  * 面板亚克力模糊 / 遮罩不模糊 / 白天黑夜独立配色
+ * ★ v0.2.5 修复：根据 data-hhkan-decoration 区分不同模式效果，
+ *   不再无条件覆盖所有弹窗，让 off/glass/frosted/solid 四模式肉眼可分
  * ============================================================ */
 (function(){
     var css = document.createElement('style');
     css.id = 'hhk-glass-force';
     css.textContent = [
-        /* 白天：云母白 */
-        'html body #player-setting-box,',
-        'html body .hc-box,',
-        'html body #episode-modal-box,',
-        'html body #recommend-modal-box,',
-        'html body #app-modal-box,',
-        'html body .hes-box{',
-        '  background:rgba(245,247,250,.62) !important;',
-        '  backdrop-filter:blur(30px) saturate(1.8) brightness(1.05) !important;',
-        '  -webkit-backdrop-filter:blur(30px) saturate(1.8) brightness(1.05) !important;',
+        /* ========== off 模式：纯色面板，无模糊 ========== */
+        'html[data-hhkan-decoration="off"] body #player-setting-box,',
+        'html[data-hhkan-decoration="off"] body .hc-box,',
+        'html[data-hhkan-decoration="off"] body #episode-modal-box,',
+        'html[data-hhkan-decoration="off"] body #recommend-modal-box,',
+        'html[data-hhkan-decoration="off"] body #app-modal-box,',
+        'html[data-hhkan-decoration="off"] body .hes-box,',
+        'html[data-hhkan-decoration="off"] body #hhk-fav-box{',
+        '  background:rgba(255,255,255,.96) !important;',
+        '  backdrop-filter:none !important;',
+        '  -webkit-backdrop-filter:none !important;',
+        '  border:1px solid rgba(0,0,0,.08) !important;',
+        '  box-shadow:0 24px 64px rgba(0,0,0,.25) !important;',
+        '}',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="off"] body #player-setting-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="off"] body .hc-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="off"] body #episode-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="off"] body #recommend-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="off"] body #app-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="off"] body .hes-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="off"] body #hhk-fav-box{',
+        '  background:rgba(28,28,36,.96) !important;',
+        '  backdrop-filter:none !important;',
+        '  -webkit-backdrop-filter:none !important;',
+        '  border:1px solid rgba(255,255,255,.08) !important;',
+        '  box-shadow:0 24px 64px rgba(0,0,0,.6) !important;',
+        '}',
+
+        /* ========== glass 模糊模式：轻量毛玻璃，淡蓝通透 ========== */
+        'html[data-hhkan-decoration="glass"] body #player-setting-box,',
+        'html[data-hhkan-decoration="glass"] body .hc-box,',
+        'html[data-hhkan-decoration="glass"] body #episode-modal-box,',
+        'html[data-hhkan-decoration="glass"] body #recommend-modal-box,',
+        'html[data-hhkan-decoration="glass"] body #app-modal-box,',
+        'html[data-hhkan-decoration="glass"] body .hes-box,',
+        'html[data-hhkan-decoration="glass"] body #hhk-fav-box{',
+        '  background:rgba(230,240,255,.55) !important;',
+        '  backdrop-filter:blur(20px) saturate(1.4) brightness(1.05) !important;',
+        '  -webkit-backdrop-filter:blur(20px) saturate(1.4) brightness(1.05) !important;',
+        '  border:1px solid rgba(255,255,255,.6) !important;',
+        '  box-shadow:0 24px 64px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.7) !important;',
+        '}',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="glass"] body #player-setting-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="glass"] body .hc-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="glass"] body #episode-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="glass"] body #recommend-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="glass"] body #app-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="glass"] body .hes-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="glass"] body #hhk-fav-box{',
+        '  background:rgba(20,30,60,.55) !important;',
+        '  backdrop-filter:blur(20px) saturate(1.3) !important;',
+        '  -webkit-backdrop-filter:blur(20px) saturate(1.3) !important;',
+        '  border:1px solid rgba(255,255,255,.08) !important;',
+        '  box-shadow:0 24px 64px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06) !important;',
+        '}',
+
+        /* ========== frosted 亚克力模式：强磨砂层次分明 ========== */
+        'html[data-hhkan-decoration="frosted"] body #player-setting-box,',
+        'html[data-hhkan-decoration="frosted"] body .hc-box,',
+        'html[data-hhkan-decoration="frosted"] body #episode-modal-box,',
+        'html[data-hhkan-decoration="frosted"] body #recommend-modal-box,',
+        'html[data-hhkan-decoration="frosted"] body #app-modal-box,',
+        'html[data-hhkan-decoration="frosted"] body .hes-box,',
+        'html[data-hhkan-decoration="frosted"] body #hhk-fav-box{',
+        /* ★ 亚克力模式：暖灰磨砂，无紫色 */
+        '  background:rgba(245,245,248,.65) !important;',
+        '  backdrop-filter:blur(30px) saturate(1.6) brightness(1.05) !important;',
+        '  -webkit-backdrop-filter:blur(30px) saturate(1.6) brightness(1.05) !important;',
         '  border:1px solid rgba(255,255,255,.7) !important;',
         '  box-shadow:0 24px 64px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.9) !important;',
         '}',
-        /* 黑夜：云母深 */
-        'html[data-pp-theme="dark"] body #player-setting-box,',
-        'html[data-pp-theme="dark"] body .hc-box,',
-        'html[data-pp-theme="dark"] body #episode-modal-box,',
-        'html[data-pp-theme="dark"] body #recommend-modal-box,',
-        'html[data-pp-theme="dark"] body #app-modal-box,',
-        'html[data-pp-theme="dark"] body .hes-box{',
-        '  background:rgba(24,24,34,.68) !important;',
-        '  backdrop-filter:blur(30px) saturate(1.5) !important;',
-        '  -webkit-backdrop-filter:blur(30px) saturate(1.5) !important;',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="frosted"] body #player-setting-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="frosted"] body .hc-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="frosted"] body #episode-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="frosted"] body #recommend-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="frosted"] body #app-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="frosted"] body .hes-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="frosted"] body #hhk-fav-box{',
+        /* ★ 亚克力夜间：中性深灰，无紫色 */
+        '  background:rgba(30,30,36,.68) !important;',
+        '  backdrop-filter:blur(30px) saturate(1.4) !important;',
+        '  -webkit-backdrop-filter:blur(30px) saturate(1.4) !important;',
         '  border:1px solid rgba(255,255,255,.10) !important;',
         '  box-shadow:0 24px 64px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08) !important;',
         '}',
+
+        /* ========== solid 云母模式：近实底暖灰，极轻模糊 ========== */
+        'html[data-hhkan-decoration="solid"] body #player-setting-box,',
+        'html[data-hhkan-decoration="solid"] body .hc-box,',
+        'html[data-hhkan-decoration="solid"] body #episode-modal-box,',
+        'html[data-hhkan-decoration="solid"] body #recommend-modal-box,',
+        'html[data-hhkan-decoration="solid"] body #app-modal-box,',
+        'html[data-hhkan-decoration="solid"] body .hes-box,',
+        'html[data-hhkan-decoration="solid"] body #hhk-fav-box{',
+        /* ★ 云母模式：暖奶白/浅杏色，近实底，极轻模糊，和冷色调模式明显区分 */
+        '  background:linear-gradient(160deg, rgba(255,251,240,.94) 0%, rgba(252,244,228,.94) 50%, rgba(248,238,220,.94) 100%) !important;',
+        '  backdrop-filter:blur(4px) saturate(1.08) brightness(1.03) !important;',
+        '  -webkit-backdrop-filter:blur(4px) saturate(1.08) brightness(1.03) !important;',
+        '  border:1px solid rgba(255,248,230,.9) !important;',
+        '  box-shadow:0 24px 64px rgba(180,150,100,.18), inset 0 1px 0 rgba(255,255,255,.98) !important;',
+        '}',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="solid"] body #player-setting-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="solid"] body .hc-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="solid"] body #episode-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="solid"] body #recommend-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="solid"] body #app-modal-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="solid"] body .hes-box,',
+        'html[data-pp-theme="dark"][data-hhkan-decoration="solid"] body #hhk-fav-box{',
+        /* ★ 云母夜间：暖深棕灰，近实底，极轻模糊 */
+        '  background:linear-gradient(160deg, rgba(42,36,32,.94) 0%, rgba(38,32,28,.94) 50%, rgba(34,28,24,.94) 100%) !important;',
+        '  backdrop-filter:blur(4px) saturate(1.15) !important;',
+        '  -webkit-backdrop-filter:blur(4px) saturate(1.15) !important;',
+        '  border:1px solid rgba(255,230,200,.12) !important;',
+        '  box-shadow:0 24px 64px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,240,220,.08) !important;',
+        '}',
+
         /* 遮罩层：纯色，不模糊 */
         'html body #player-setting-mask,',
         'html body #hhkan-continue-mask,',
@@ -20819,3 +21972,243 @@ if (document.readyState === "loading") {
     ].join('\n');
     (document.head || document.documentElement).appendChild(css);
 })();
+
+// ============================================================
+// ★ 搜索增强：历史记录 / 关键词高亮 / 回车直搜
+// ============================================================
+(function(){
+    var HIST_KEY = 'hhkan_search_history';
+    var MAX_HIST = 12;
+
+    function loadHist(){
+        try{ var a = JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); return Array.isArray(a) ? a : []; }
+        catch(e){ return []; }
+    }
+    function saveHist(arr){
+        try{ localStorage.setItem(HIST_KEY, JSON.stringify(arr.slice(0, MAX_HIST))); }catch(e){}
+    }
+    function pushHist(kw){
+        kw = (kw || '').trim();
+        if(!kw) return;
+        var arr = loadHist().filter(function(x){ return x !== kw; });
+        arr.unshift(kw);
+        saveHist(arr);
+    }
+    function clearHist(){ saveHist([]); }
+
+    // ---- 搜索框选择器 ----
+    var INPUT_SELS = [
+        'input[name="searchword"]', 'input[name="q"]', 'input[type="search"]',
+        '#search-input', '#search-key', '.search-input input', '.search-box input',
+        'header input[type="text"]', '.header-search input', 'input.search',
+        '.searchform input[type="text"]', 'form.search input[type="text"]'
+    ];
+    function findSearchInput(){
+        for(var i=0;i<INPUT_SELS.length;i++){
+            var el = document.querySelector(INPUT_SELS[i]);
+            if(el && el.offsetParent !== null) return el;
+        }
+        // 兜底：找任意 placeholder 含"搜索"的可见输入框
+        var all = document.querySelectorAll('input[type="text"], input:not([type])');
+        for(var j=0;j<all.length;j++){
+            var ph = all[j].getAttribute('placeholder') || '';
+            if(/搜索|找|影视|剧名/.test(ph) && all[j].offsetParent !== null) return all[j];
+        }
+        return null;
+    }
+
+    // ---- 历史下拉浮层 ----
+    var panel = null;
+    function ensurePanel(){
+        if(panel) return panel;
+        panel = document.createElement('div');
+        panel.id = 'hhk-search-hist';
+        panel.style.cssText = [
+            'position:absolute;z-index:2147483646;display:none;',
+            'background:#fff;color:#222;border:1px solid #e5e5e5;border-radius:8px;',
+            'box-shadow:0 8px 28px rgba(0,0,0,.18);min-width:220px;max-width:320px;',
+            'padding:6px;font-size:13px;font-family:system-ui,-apple-system,sans-serif;'
+        ].join('');
+        (document.body || document.documentElement).appendChild(panel);
+        return panel;
+    }
+    function renderPanel(input){
+        var p = ensurePanel();
+        var arr = loadHist();
+        var html = '';
+        if(arr.length){
+            html += '<div style="padding:6px 8px;color:#888;font-size:12px;display:flex;justify-content:space-between;align-items:center;">'
+                  + '<span>最近搜索</span>'
+                  + '<span id="hhk-hist-clear" style="cursor:pointer;color:#e65100;">🗑 清空</span>'
+                  + '</div>';
+            arr.forEach(function(kw){
+                html += '<div class="hhk-hist-item" data-kw="'+kw.replace(/"/g,'&quot;')+'" '
+                      +  'style="padding:7px 10px;cursor:pointer;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔍 '+kw+'</div>';
+            });
+        }else{
+            html = '<div style="padding:10px;color:#999;text-align:center;">暂无搜索历史</div>';
+        }
+        p.innerHTML = html;
+        // 定位到输入框下方
+        var r = input.getBoundingClientRect();
+        p.style.top = (window.pageYOffset + r.bottom + 6) + 'px';
+        p.style.left = (window.pageXOffset + r.left) + 'px';
+        p.style.minWidth = Math.max(r.width, 220) + 'px';
+        p.style.display = 'block';
+        // 绑定
+        var clearBtn = p.querySelector('#hhk-hist-clear');
+        if(clearBtn) clearBtn.onclick = function(e){
+            e.stopPropagation(); clearHist(); renderPanel(input);
+        };
+        p.querySelectorAll('.hhk-hist-item').forEach(function(it){
+            it.onclick = function(){
+                var kw = it.getAttribute('data-kw');
+                input.value = kw;
+                hidePanel();
+                submitSearch(input, kw);
+            };
+        });
+    }
+    function hidePanel(){ if(panel) panel.style.display = 'none'; }
+
+    // ---- 触发搜索：优先提交所在 form，否则模拟点击搜索按钮 ----
+    function submitSearch(input, kw){
+        kw = (kw || input.value || '').trim();
+        if(!kw) return;
+        pushHist(kw);
+        var form = input.form || input.closest('form');
+        if(form){
+            // 如果 form 是 GET 且 action 指向 search.php，直接跳转更可靠
+            try{
+                var act = form.getAttribute('action') || '';
+                var method = (form.getAttribute('method') || 'get').toLowerCase();
+                if(method === 'get' && /search/i.test(act)){
+                    var url = act.split('?')[0] + '?searchword=' + encodeURIComponent(kw);
+                    location.href = url;
+                    return;
+                }
+            }catch(e){}
+            // 正常提交
+            try{ form.submit(); return; }catch(e){}
+        }
+        // 兜底：找搜索按钮点击
+        var btnSels = ['button[type="submit"]', '.search-btn', '#search-btn', 'input[type="submit"]', '.btn-search'];
+        for(var i=0;i<btnSels.length;i++){
+            var b = document.querySelector(btnSels[i]);
+            if(b){ b.click(); return; }
+        }
+    }
+
+    // ---- 绑定搜索框 ----
+    function bindInput(){
+        var input = findSearchInput();
+        if(!input || input._hhkSearchBound) return;
+        input._hhkSearchBound = true;
+
+        // 聚焦显示历史
+        input.addEventListener('focus', function(){ renderPanel(input); });
+        // 输入时若为空显示历史
+        input.addEventListener('input', function(){
+            if(!input.value.trim()) renderPanel(input);
+            else hidePanel();
+        });
+        // 回车直接触发搜索
+        input.addEventListener('keydown', function(e){
+            if(e.key === 'Enter' || e.keyCode === 13){
+                e.preventDefault();
+                e.stopPropagation();
+                submitSearch(input);
+                hidePanel();
+            }
+        });
+        // 点击外部收起
+        document.addEventListener('mousedown', function(e){
+            if(panel && panel.style.display === 'block'){
+                if(!panel.contains(e.target) && e.target !== input) hidePanel();
+            }
+        }, true);
+    }
+
+    // ---- 搜索结果标题高亮 ----
+    function highlightResults(){
+        // 从 URL 取搜索词
+        var m = location.href.match(/[?&]searchword=([^&]+)/) || location.href.match(/[?&]q=([^&]+)/);
+        if(!m) return;
+        var kw = decodeURIComponent(m[1] || '').trim();
+        if(!kw || kw.length < 1) return;
+        // 转义正则
+        var esc = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        var re = new RegExp('(' + esc + ')', 'gi');
+
+        // 候选标题选择器（覆盖 MacCMS / 苹果CMS / 通用模板）
+        var TITLE_SELS = [
+            '.searchlist .stui-vodlist__item a', '.searchlist .title a',
+            '.module-search-item .video-info-title a', '.searchlist_item .title a',
+            '.search-result .title a', '.result-list .title a',
+            '.video-list .title a', '.vod-list .title a',
+            '.list-item .title a', '.search-vod .title a',
+            '.stui-vodlist__title a', '.module-list .title a',
+            '.hot-list .title a', '.search-img .title a',
+            '.search a.title', '.search-results a.title',
+            'h3.title a', 'h4.title a', '.card-title a'
+        ];
+        var nodes = [];
+        TITLE_SELS.forEach(function(sel){
+            document.querySelectorAll(sel).forEach(function(n){ nodes.push(n); });
+        });
+        // 去重
+        var seen = new Set();
+        nodes = nodes.filter(function(n){
+            if(seen.has(n)) return false; seen.add(n); return true;
+        });
+        nodes.forEach(function(el){
+            if(el._hhkHlDone) return;
+            el._hhkHlDone = true;
+            walkNode(el, re);
+        });
+    }
+    function walkNode(el, re){
+        // 只处理文本节点，避免破坏 <a> 标签结构
+        var children = Array.prototype.slice.call(el.childNodes);
+        children.forEach(function(node){
+            if(node.nodeType === 3){ // TEXT_NODE
+                var txt = node.nodeValue;
+                if(re.test(txt)){
+                    re.lastIndex = 0;
+                    var frag = document.createDocumentFragment();
+                    var last = 0, match;
+                    while((match = re.exec(txt)) !== null){
+                        if(match.index > last){
+                            frag.appendChild(document.createTextNode(txt.slice(last, match.index)));
+                        }
+                        var mark = document.createElement('mark');
+                        mark.textContent = match[0];
+                        mark.style.cssText = 'background:#ffe58f;color:#d4380d;padding:0 2px;border-radius:3px;';
+                        frag.appendChild(mark);
+                        last = match.index + match[0].length;
+                        if(match[0].length === 0) re.lastIndex++;
+                    }
+                    if(last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+                    el.replaceChild(frag, node);
+                }
+            }else if(node.nodeType === 1){ // ELEMENT_NODE
+                // 跳过已高亮过的 mark 与 script/style
+                if(node.tagName === 'MARK' || node.tagName === 'SCRIPT' || node.tagName === 'STYLE') return;
+                walkNode(node, re);
+            }
+        });
+    }
+
+    // ---- 启动 ----
+    function boot(){
+        try{ bindInput(); }catch(e){}
+        try{ highlightResults(); }catch(e){}
+    }
+    if(document.readyState === 'loading'){
+        document.addEventListener('DOMContentLoaded', boot);
+    }else{ boot(); }
+    // SPA / 异步渲染兜底
+    setTimeout(boot, 1200);
+    setTimeout(boot, 3000);
+})();
+//（注：内容由AI生成）
